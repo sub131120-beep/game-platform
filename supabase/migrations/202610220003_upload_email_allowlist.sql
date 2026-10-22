@@ -1,5 +1,5 @@
 -- Only verified accounts on this private email allowlist may submit or upload games.
-create table public.game_upload_allowlist (
+create table if not exists public.game_upload_allowlist (
   email text primary key check (email = lower(btrim(email))),
   added_at timestamptz not null default now()
 );
@@ -25,7 +25,8 @@ $$;
 revoke all on function public.can_upload_games() from public, anon;
 grant execute on function public.can_upload_games() to authenticated;
 
-drop policy "active owner creates project" on public.projects;
+drop policy if exists "active owner creates project" on public.projects;
+drop policy if exists "allowlisted active owner creates project" on public.projects;
 create policy "allowlisted active owner creates project"
 on public.projects for insert to authenticated
 with check (
@@ -36,7 +37,10 @@ with check (
   and visibility = 'private'
 );
 
-drop policy "active owners manage builds" on public.project_builds;
+drop policy if exists "active owners manage builds" on public.project_builds;
+drop policy if exists "allowlisted owner creates builds" on public.project_builds;
+drop policy if exists "active owner updates draft builds" on public.project_builds;
+drop policy if exists "active owner deletes draft builds" on public.project_builds;
 create policy "allowlisted owner creates builds"
 on public.project_builds for insert to authenticated
 with check (
@@ -67,7 +71,8 @@ using (exists (
     and public.is_active_user() and p.moderation_status in ('draft','review')
 ));
 
-drop policy "owners upload game build files" on storage.objects;
+drop policy if exists "owners upload game build files" on storage.objects;
+drop policy if exists "allowlisted owners upload game build files" on storage.objects;
 create policy "allowlisted owners upload game build files"
 on storage.objects for insert to authenticated
 with check (
