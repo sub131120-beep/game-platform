@@ -34,7 +34,101 @@ function Play({projects,session,profile,loading}:{projects:Project[];session:Ses
 function LaunchFrame({project:p}:{project:Project}){const navigate=useNavigate(),[launchUrl,setLaunchUrl]=useState(''),[failed,setFailed]=useState(false),[launching,setLaunching]=useState(true),[attempt,setAttempt]=useState(0);useEffect(()=>{let live=true;setLaunching(true);setFailed(false);void supabase!.functions.invoke('game-launch',{body:{project_id:p.id}}).then(({data,error})=>{if(!live)return;if(error||!data?.launch_url){setFailed(true)}else{try{if(!isHttpsLaunchUrl(data.launch_url))throw Error();setLaunchUrl(data.launch_url)}catch{setFailed(true)}}setLaunching(false)});return()=>{live=false}},[p.id,attempt]);return <div className="player-page"><button className="back" onClick={()=>navigate(`/project/${p.slug}`)}><ArrowLeft/> 작품으로</button><div className="player-title"><div><div className="eyebrow muted">NOW PLAYING</div><h1>{p.title}</h1></div><button className="button" onClick={()=>document.querySelector('iframe')?.requestFullscreen()}>전체 화면</button></div>{launching?<div className="loading">로그인, 인증, 작품 공개 상태와 실행 권한을 확인하는 중…</div>:failed?<div className="player-error"><h2>게임을 불러오지 못했습니다</h2><p>호스팅 주소와 iframe 허용 설정을 확인한 뒤 다시 시도해 주세요.</p><button className="button primary" onClick={()=>{setLaunchUrl('');setAttempt(attempt+1)}}>다시 시도</button></div>:<iframe key={launchUrl} title={`${p.title} 게임`} src={launchUrl} sandbox="allow-scripts allow-pointer-lock allow-forms" referrerPolicy="no-referrer" allow="fullscreen; gamepad" onError={()=>setFailed(true)}/>}</div>}
 function Auth({mode}:{mode:'login'|'signup'|'reset'}){const [error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);const nav=useNavigate(),loc=useLocation();const from=(loc.state as any)?.from||'/account';const title=mode==='signup'?'계정 만들기':mode==='reset'?'비밀번호 재설정':'다시 만나 반가워요';async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();if(!supabase){setError('Supabase 환경 설정을 먼저 완료해 주세요.');return}setBusy(true);setError('');setMessage('');const f=new FormData(e.currentTarget), email=String(f.get('email')),password=String(f.get('password')||'');try{if(mode==='signup'){const username=String(f.get('username')).trim().toLowerCase(),display_name=String(f.get('display_name')).trim();if(password.length<10)throw Error('비밀번호는 10자 이상이어야 합니다.');if(password!==f.get('confirm'))throw Error('비밀번호 확인이 일치하지 않습니다.');if(!f.get('terms'))throw Error('이용약관과 개인정보 처리방침에 동의해 주세요.');const {error:e}=await supabase.auth.signUp({email,password,options:{emailRedirectTo:`${window.location.origin}${import.meta.env.BASE_URL}account`,data:{username,display_name}}});if(e)throw e;setMessage('인증 메일을 보냈습니다. 이메일 인증을 마치면 로그인할 수 있습니다.')}else if(mode==='login'){const {data,error:e}=await supabase.auth.signInWithPassword({email,password});if(e)throw e;if(!data.user.email_confirmed_at){await supabase.auth.signOut();throw Error('이메일 인증을 완료한 뒤 로그인해 주세요.')}nav(from,{replace:true})}else{const {error:e}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:`${window.location.origin}${import.meta.env.BASE_URL}account`});if(e)throw e;setMessage('계정이 존재하는 경우 비밀번호 재설정 링크를 이메일로 보냈습니다.')}}catch(err){const message=err instanceof Error?err.message:'요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.';setError(message.includes('duplicate key')?'이미 사용 중인 아이디 또는 닉네임입니다.':message)}finally{setBusy(false)}}return <div className="auth-wrap"><div className="auth-art"><div className="eyebrow"><Sparkles size={14}/> YOUR NEXT ADVENTURE</div><h2>작은 팀의 큰 상상,<br/><em>한 번의 클릭으로.</em></h2><p>새로운 세계를 만드는 창작자와<br/>플레이어를 연결합니다.</p></div><form className="auth-card" onSubmit={submit}><div className="eyebrow muted">PLAYGROUND ACCOUNT</div><h1>{title}</h1><p className="auth-sub">{mode==='signup'?'멋진 게임 경험이 기다리고 있어요.':mode==='reset'?'가입한 이메일로 안전한 재설정 링크를 보내드립니다.':'계속하려면 로그인해 주세요.'}</p>{mode==='signup'&&<><label>아이디<input name="username" required minLength={3} maxLength={24} pattern="[a-zA-Z0-9_]+" placeholder="영문, 숫자, 밑줄"/></label><label>닉네임<input name="display_name" required maxLength={32} placeholder="플랫폼에 표시될 이름"/></label></>}<label>이메일<input name="email" type="email" required autoComplete="email" placeholder="you@example.com"/></label>{mode!=='reset'&&<label>비밀번호<input name="password" type="password" required autoComplete={mode==='signup'?'new-password':'current-password'} placeholder={mode==='signup'?'10자 이상':'비밀번호 입력'}/></label>}{mode==='signup'&&<><label>비밀번호 확인<input name="confirm" type="password" required autoComplete="new-password"/></label><label className="terms-check"><input type="checkbox" name="terms"/> <span><Link to="/terms">이용약관</Link> 및 <Link to="/privacy">개인정보 처리방침</Link>에 동의합니다. (필수)</span></label></>}{error&&<p className="form-error">{error}</p>}{message&&<p className="form-success">{message}</p>}<button disabled={busy} className="button primary full">{busy?'처리 중…':mode==='signup'?'가입하고 인증하기':mode==='reset'?'재설정 링크 보내기':'로그인'} <ArrowRight size={16}/></button><div className="auth-links">{mode==='login'?<><Link to="/reset">비밀번호를 잊으셨나요?</Link><span>계정이 없나요? <Link to="/signup">회원가입</Link></span></>:<span>이미 계정이 있나요? <Link to="/login">로그인</Link></span>}</div></form></div>}
 function Account({session,profile,reload}:{session:Session;profile:any;reload:()=>Promise<void>}){const [msg,setMsg]=useState('');async function rename(e:FormEvent<HTMLFormElement>){e.preventDefault();const d=String(new FormData(e.currentTarget).get('display_name')).trim();const {error}=await supabase!.from('profiles').update({display_name:d}).eq('id',session.user.id);setMsg(error?.message||'프로필을 저장했습니다.');await reload()}async function changePassword(e:FormEvent<HTMLFormElement>){e.preventDefault();const d=new FormData(e.currentTarget),p=String(d.get('password'));if(p.length<10){setMsg('새 비밀번호는 10자 이상이어야 합니다.');return}const {error}=await supabase!.auth.updateUser({password:p});setMsg(error?.message||'비밀번호를 변경했습니다.')}return <div className="page-wrap account"><div className="eyebrow muted">ACCOUNT SETTINGS</div><h1>계정 설정</h1><div className="settings-grid"><section className="settings-card"><UserRound/><h2>프로필</h2><p>로그인한 회원님의 공개 프로필 정보입니다.</p><form onSubmit={rename}><label>아이디<input value={profile?.username||''} disabled/></label><label>닉네임<input name="display_name" defaultValue={profile?.display_name||''} required maxLength={32}/></label><button className="button primary">변경 저장</button></form></section><section className="settings-card"><Shield/><h2>보안</h2><p>이메일 인증: {session.user.email_confirmed_at?'완료':'미완료'}<br/>계정 상태: {profile?.account_status||'확인 중'}</p><form onSubmit={changePassword}><label>새 비밀번호<input name="password" type="password" required minLength={10} autoComplete="new-password"/></label><button className="button">비밀번호 변경</button></form><button className="text-button" onClick={async()=>{await supabase!.auth.signOut({scope:'global'});window.location.assign(import.meta.env.BASE_URL)}}>모든 기기에서 로그아웃</button></section></div>{msg&&<p className="form-success">{msg}</p>}</div>}
-function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){const [message,setMessage]=useState(''),[busy,setBusy]=useState(false);async function submit(e:FormEvent<HTMLFormElement>){e.preventDefault();setBusy(true);setMessage('');const formElement=e.currentTarget,form=new FormData(formElement),title=String(form.get('title')).trim(),slug=String(form.get('slug')).trim().toLowerCase(),url=String(form.get('launch_url')).trim();if(url){try{if(new URL(url).protocol!=='https:')throw Error();}catch{setMessage('실행 주소는 올바른 HTTPS URL이어야 합니다.');setBusy(false);return}}const {data,error}=await supabase!.from('projects').insert({owner_id:session.user.id,title,slug,description:String(form.get('description')),category:String(form.get('category')),version:String(form.get('version')||'1.0.0'),visibility:'private',moderation_status:'review'}).select('id').single();if(error){setMessage(error.message);setBusy(false);return}if(url){const {error:buildError}=await supabase!.from('project_builds').insert({project_id:data.id,version:String(form.get('version')||'1.0.0'),build_type:'html5',launch_url:url});if(buildError){await supabase!.from('projects').delete().eq('id',data.id);setMessage(buildError.message);setBusy(false);return}}setMessage('검토 요청을 제출했습니다. 운영자 승인 후 공개됩니다.');formElement.reset();await reload();setBusy(false)}return <div className="page-wrap account"><div className="eyebrow muted">CREATOR STUDIO</div><h1>작품 등록</h1><p className="muted">작품은 비공개 초안으로 저장됩니다. 공개 전에 운영자 검토가 필요합니다. 실행 게임은 별도 호스팅의 HTTPS 주소로 제공하세요.</p><form className="settings-card creator-form" onSubmit={submit}><label>작품 제목<input name="title" required maxLength={100}/></label><label>고유 슬러그<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80} placeholder="my-game"/></label><label>카테고리<select name="category">{categories.slice(1).map(c=><option key={c}>{c}</option>)}</select></label><label>버전<input name="version" defaultValue="1.0.0" required/></label><label>작품 설명<textarea name="description" required maxLength={10000}/></label><label>브라우저 실행 URL (HTTPS)<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><button className="button primary" disabled={busy}>{busy?'저장 중…':'운영자 검토 요청'}</button>{message&&<p className="form-success">{message}</p>}</form></div>}
+const MAX_GAME_FILES = 500;
+const MAX_GAME_FILE_BYTES = 50 * 1024 * 1024;
+const MAX_GAME_TOTAL_BYTES = 200 * 1024 * 1024;
+
+function contentTypeFor(file: File, path: string) {
+  if (file.type) return file.type;
+  const extension = path.split('.').pop()?.toLowerCase();
+  const knownTypes: Record<string, string> = {
+    html: 'text/html', htm: 'text/html', js: 'text/javascript', mjs: 'text/javascript',
+    css: 'text/css', json: 'application/json', wasm: 'application/wasm',
+    png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+    gif: 'image/gif', svg: 'image/svg+xml', ico: 'image/x-icon',
+    mp3: 'audio/mpeg', ogg: 'audio/ogg', wav: 'audio/wav', mp4: 'video/mp4', webm: 'video/webm',
+    woff: 'font/woff', woff2: 'font/woff2', ttf: 'font/ttf', otf: 'font/otf',
+  };
+  return extension ? knownTypes[extension] || 'application/octet-stream' : 'application/octet-stream';
+}
+
+function getGameFileEntries(files: FileList | null) {
+  const selected = Array.from(files || []);
+  if (!selected.length) return [];
+  if (selected.length > MAX_GAME_FILES) throw new Error(`게임 파일은 한 번에 ${MAX_GAME_FILES}개까지 올릴 수 있어요.`);
+  const totalBytes = selected.reduce((sum, file) => sum + file.size, 0);
+  if (totalBytes > MAX_GAME_TOTAL_BYTES) throw new Error('게임 폴더 전체 크기는 200MB 이하여야 해요.');
+  if (selected.some(file => file.size > MAX_GAME_FILE_BYTES)) throw new Error('개별 파일은 50MB 이하여야 해요.');
+
+  const root = (selected[0] as File & { webkitRelativePath?: string }).webkitRelativePath?.split('/')[0];
+  const entries = selected.map(file => {
+    const sourcePath = (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name;
+    const parts = sourcePath.split('/').filter(Boolean);
+    if (root && parts[0] === root) parts.shift();
+    if (!parts.length || parts.some(part => part === '.' || part === '..' || part.includes('\\'))) {
+      throw new Error('게임 폴더에 올바르지 않은 파일 경로가 있습니다.');
+    }
+    return { file, path: parts.join('/') };
+  });
+  const uniquePaths = new Set(entries.map(entry => entry.path.toLowerCase()));
+  if (uniquePaths.size !== entries.length) throw new Error('이름이 같은 파일이 중복되어 있어요.');
+  if (!entries.some(entry => entry.path.toLowerCase() === 'index.html')) {
+    throw new Error('선택한 폴더의 가장 바깥쪽에 index.html 파일이 있어야 해요.');
+  }
+  return entries;
+}
+
+function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){
+  const [message,setMessage]=useState(''),[busy,setBusy]=useState(false),[selectedCount,setSelectedCount]=useState(0),[selectedSize,setSelectedSize]=useState(0);
+  async function submit(e:FormEvent<HTMLFormElement>){
+    e.preventDefault();
+    if(!supabase){setMessage('Supabase 설정을 먼저 완료해 주세요.');return}
+    setBusy(true);setMessage('');
+    const formElement=e.currentTarget,form=new FormData(formElement),input=formElement.elements.namedItem('game_files') as HTMLInputElement;
+    const title=String(form.get('title')).trim(),slug=String(form.get('slug')).trim().toLowerCase(),url=String(form.get('launch_url')).trim(),version=String(form.get('version')||'1.0.0');
+    let entries:{file:File;path:string}[]=[];
+    try {
+      entries=getGameFileEntries(input.files);
+      if(url&&entries.length)throw new Error('게임 폴더 업로드와 외부 URL 중 하나만 선택해 주세요.');
+      if(!url&&!entries.length)throw new Error('게임 폴더를 선택하거나 외부 HTTPS 실행 주소를 입력해 주세요.');
+      if(url&&new URL(url).protocol!=='https:')throw new Error('실행 주소는 올바른 HTTPS URL이어야 합니다.');
+    } catch(err) {setMessage(err instanceof Error?err.message:'입력한 게임 정보를 확인해 주세요.');setBusy(false);return}
+
+    const {data:project,error}=await supabase.from('projects').insert({owner_id:session.user.id,title,slug,description:String(form.get('description')),category:String(form.get('category')),version,visibility:'private',moderation_status:'review'}).select('id').single();
+    if(error||!project){setMessage(error?.message||'작품을 만들지 못했습니다.');setBusy(false);return}
+
+    const uploadedPaths:string[]=[];
+    try {
+      let launchUrl=url;
+      if(entries.length){
+        const storage=supabase.storage.from('game-builds');
+        for(let offset=0;offset<entries.length;offset+=4){
+          const batch=entries.slice(offset,offset+4);
+          const results=await Promise.allSettled(batch.map(async entry=>{
+            const path=`${session.user.id}/${project.id}/${entry.path}`;
+            uploadedPaths.push(path);
+            const {error:uploadError}=await storage.upload(path,entry.file,{contentType:contentTypeFor(entry.file,entry.path),cacheControl:'3600',upsert:false});
+            if(uploadError)throw uploadError;
+            return path;
+          }));
+          const failed=results.find(result=>result.status==='rejected');
+          if(failed?.status==='rejected')throw failed.reason;
+          setMessage(`게임 파일 업로드 중… ${Math.min(offset+batch.length,entries.length)} / ${entries.length}`);
+        }
+        launchUrl=storage.getPublicUrl(`${session.user.id}/${project.id}/index.html`).data.publicUrl;
+      }
+      const {error:buildError}=await supabase.from('project_builds').insert({project_id:project.id,version,build_type:'html5',launch_url:launchUrl,storage_path:entries.length?`${session.user.id}/${project.id}`:null});
+      if(buildError)throw buildError;
+      setMessage('검토 요청을 제출했습니다. 운영자 승인 후 공개됩니다.');
+      formElement.reset();setSelectedCount(0);setSelectedSize(0);await reload();
+    } catch(err) {
+      if(uploadedPaths.length)await supabase.storage.from('game-builds').remove(uploadedPaths);
+      await supabase.from('projects').delete().eq('id',project.id);
+      setMessage(err instanceof Error?`업로드를 완료하지 못했습니다: ${err.message}`:'업로드를 완료하지 못했습니다. 설정과 네트워크를 확인해 주세요.');
+    } finally {setBusy(false)}
+  }
+  return <div className="page-wrap account"><div className="eyebrow muted">CREATOR STUDIO</div><h1>작품 등록</h1><p className="muted">HTML5 게임 폴더를 올리거나 외부 HTTPS 주소를 등록할 수 있어요. 업로드 폴더의 최상위에 index.html이 있어야 합니다. 제출한 작품은 운영자 승인 후 공개됩니다.</p><form className="settings-card creator-form" onSubmit={submit}><label>작품 제목<input name="title" required maxLength={100}/></label><label>고유 슬러그<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80} placeholder="my-game"/></label><label>카테고리<select name="category">{categories.slice(1).map(c=><option key={c}>{c}</option>)}</select></label><label>버전<input name="version" defaultValue="1.0.0" required/></label><label>작품 설명<textarea name="description" required maxLength={10000}/></label><label>게임 폴더 업로드 (HTML5)<input name="game_files" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB 선택됨 (최대 500개, 전체 200MB)</small>}</label><label>또는 외부 브라우저 실행 URL (HTTPS)<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><p className="upload-note">Supabase Storage 업로드는 파일당 50MB, 전체 200MB까지 지원합니다. 업로드된 게임 파일은 공개 URL로 제공되며, 폴더의 하위 경로와 파일 이름은 유지됩니다.</p><button className="button primary" disabled={busy}>{busy?'업로드 중…':'검토 요청 제출'}</button>{message&&<p className="form-success">{message}</p>}</form></div>
+}
 function Admin({reload}:{reload:()=>Promise<void>}){const [busy,setBusy]=useState(''),[projects,setProjects]=useState<Project[]>([]),[members,setMembers]=useState<any[]>([]);const load=async()=>{const [p,u]=await Promise.all([supabase!.from('projects').select('id,owner_id,slug,title,description,category,version,visibility,moderation_status,cover_url,created_at').in('moderation_status',['review','published','suspended']).order('created_at',{ascending:false}),supabase!.from('profiles').select('id,username,display_name,role,account_status,created_at').order('created_at',{ascending:false}).limit(100)]);setProjects((p.data||[]) as Project[]);setMembers(u.data||[])};useEffect(()=>{void load()},[]);async function act(action:string,id:string,status:string,label:string){if(!confirm(`${label} 처리할까요?`))return;setBusy(id);const {error}=await supabase!.functions.invoke('admin-action',{body:{action,project_id:action==='set_project_status'?id:undefined,target_user_id:action==='set_account_status'?id:undefined,status}});if(error)alert(error.message);else await reload();await load();setBusy('')}return <div className="page-wrap"><div className="eyebrow muted">ADMIN CONSOLE</div><h1>운영 대시보드</h1><h2>작품 검토</h2><p className="muted">승인 작품은 공개됩니다. 정지하면 새 공개 조회가 차단됩니다.</p><div className="admin-table">{projects.length?projects.map(p=><div className="admin-row" key={p.id}><div><b>{p.title}</b><small>{p.slug} · {p.category} · {p.moderation_status}</small></div><button disabled={busy===p.id} className="button" onClick={()=>void act('set_project_status',p.id,p.moderation_status==='published'?'suspended':'published',p.moderation_status==='published'?'비공개':'공개')}>{p.moderation_status==='published'?'비공개 처리':'공개 승인'}</button></div>):<div className="empty">검토할 작품이 없습니다.</div>}</div><h2 className="admin-heading">회원 관리 <small>최대 최근 100명 · 이메일은 표시하지 않습니다</small></h2><div className="admin-table">{members.length?members.map(u=><div className="admin-row" key={u.id}><div><b>{u.display_name} <span className="member-handle">@{u.username}</span></b><small>{u.id} · {u.role} · {u.account_status} · {new Date(u.created_at).toLocaleDateString('ko-KR')}</small></div>{u.role!=='admin'&&<button disabled={busy===u.id} className="button" onClick={()=>void act('set_account_status',u.id,u.account_status==='suspended'?'active':'suspended',u.account_status==='suspended'?'정지 해제':'계정 정지')}>{u.account_status==='suspended'?'정지 해제':'계정 정지'}</button>}</div>):<div className="empty">회원이 없습니다.</div>}</div><p className="note">계정 정지는 Auth의 신규 로그인/토큰 갱신을 막고 RLS의 활성 상태 검사로 보호된 데이터 요청을 차단합니다. 이미 발행된 JWT는 만료 전까지 보호된 데이터베이스 접근에서 상태를 확인해야 합니다.</p></div>}
 function Policy({title}:{title:string}){return <div className="page-wrap policy"><div className="eyebrow muted">PLAYGROUND</div><h1>{title}</h1><p>이 문서는 서비스 운영자가 실제 사업자 정보, 시행일, 처리 목적과 보유 기간을 검토해 확정해야 하는 초안입니다. 게시 전에 법률 및 개인정보 보호 요건에 맞춰 내용을 완성하세요.</p><h2>서비스 이용</h2><p>회원은 계정을 안전하게 관리하고, 권리를 보유하거나 게시 허가를 받은 콘텐츠만 등록해야 합니다. 운영자는 신고된 콘텐츠를 검토하고 정책 위반 콘텐츠의 노출을 제한할 수 있습니다.</p><h2>개인정보 처리</h2><p>계정 인증은 Supabase Auth가 처리합니다. 플랫폼은 아이디, 닉네임, 작품 활동에 필요한 최소 정보를 저장합니다. 구체적인 보유 기간과 문의처는 운영자가 정식 운영 전에 기입해야 합니다.</p></div>}
 export default App;
