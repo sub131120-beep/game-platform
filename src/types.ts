@@ -1,0 +1,1 @@
+export type Project = { id: string; owner_id: string; slug: string; title: string; description: string; category: string; version: string; visibility: 'public'|'private'; moderation_status: string; cover_url: string|null; created_at: string; project_builds?: { launch_url: string|null; download_url: string|null; build_type: string }[] };
