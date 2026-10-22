@@ -8,7 +8,7 @@ React + TypeScript + Vite 기반의 GitHub Pages 정적 프런트엔드와 Supab
 - Supabase Auth 회원가입(아이디/닉네임 분리), 이메일 인증 안내, 로그인/로그아웃, 재설정 메일, 비밀번호 변경
 - 로그인 후 원래 페이지로 돌아가는 실행 경로, 이메일 인증 및 계정 상태 확인
 - 즐겨찾기, 프로필 닉네임 변경
-- 개발자 작품 검토 제출, 외부 HTTPS 주소 연결, HTML5 게임 폴더의 Supabase Storage 업로드
+- 허용 목록 이메일 계정만 작품 제출 가능, 외부 HTTPS 주소 연결, HTML5 게임 폴더의 Supabase Storage 업로드
 - 관리자 작품 공개/비공개 검토 및 회원 정지/해제 Edge Functions와 감사 로그
 - 서버 측 game-launch 권한 검사와 플레이 접근 기록 (실행 URL은 공개 작품 빌드 정책에서 숨김)
 - PostgreSQL 스키마, UNIQUE/CHECK 제약, 소유자/공개/운영자 RLS 정책
@@ -37,15 +37,16 @@ npm run dev
 
 1. Supabase 프로젝트를 만들고 Authentication > URL Configuration의 Site URL과 Redirect URLs에 로컬 주소 및 GitHub Pages URL을 등록합니다. 프로젝트 페이지는 `https://OWNER.github.io/REPOSITORY/` 형식입니다.
 2. Authentication에서 이메일 확인을 활성화하고 실제 운영 이메일 발송에는 검증된 SMTP를 설정합니다.
-3. 새 프로젝트의 SQL Editor에서 `supabase/migrations/202610220001_initial_schema.sql`을 한 번 적용하고, HTML5 업로드를 켜려면 이어서 `supabase/migrations/202610220002_game_storage.sql`도 한 번 적용합니다. 기존 프로젝트에서 첫 마이그레이션을 이미 실행했다면 두 번째 파일만 실행합니다.
-4. Supabase CLI로 Edge Function을 배포합니다:
+3. 새 프로젝트의 SQL Editor에서 `supabase/migrations/202610220001_initial_schema.sql`을 한 번 적용하고, 이어서 `202610220002_game_storage.sql`, `202610220003_upload_email_allowlist.sql` 순서로 한 번씩 적용합니다. 기존 프로젝트에서 첫 마이그레이션을 이미 실행했다면 두 후속 파일만 적용합니다.
+4. SQL Editor에서 업로드 허용 이메일을 비공개 DB 허용 목록에 추가합니다: `insert into public.game_upload_allowlist(email) values (lower('YOUR_EMAIL')) on conflict (email) do nothing;` 이 주소는 프런트엔드 번들이나 공개 저장소에 넣지 않습니다.
+5. Supabase CLI로 Edge Function을 배포합니다:
    ```sh
    supabase functions deploy admin-action
    supabase functions deploy game-launch
    ```
    Supabase에서 제공하는 함수 secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`를 확인합니다. service role key를 클라이언트 환경에 복사하지 않습니다.
-5. 신뢰할 수 있는 초기 운영자 한 명을 Auth 가입 완료 후 SQL Editor에서 역할 승격합니다: `update public.profiles set role='admin' where username='YOUR_USERNAME';` 운영 DB에서만 신원을 별도로 확인한 후 실행합니다.
-6. Supabase Auth password policy와 rate limits를 검토하고, 이메일 링크 만료 및 JWT 만료 시간을 운영 요구에 맞게 정합니다.
+6. 신뢰할 수 있는 초기 운영자 한 명을 Auth 가입 완료 후 SQL Editor에서 역할 승격합니다: `update public.profiles set role='admin' where username='YOUR_USERNAME';` 운영 DB에서만 신원을 별도로 확인한 후 실행합니다.
+7. Supabase Auth password policy와 rate limits를 검토하고, 이메일 링크 만료 및 JWT 만료 시간을 운영 요구에 맞게 정합니다.
 
 ## GitHub Pages 배포
 
@@ -66,7 +67,7 @@ npm run build
 
 ## 보안/게임 호스팅 메모
 
-회원 제작 코드를 같은 origin에서 실행하지 마세요. Storage의 `game-builds` 공개 버킷은 게임을 iframe에서 열기 위해 공개 정적 파일 호스팅으로 쓰입니다. 업로드된 파일은 작품 승인 전에도 URL을 아는 누구나 읽을 수 있으므로 민감한 파일을 업로드하지 말고, 운영자는 승인 전에 콘텐츠를 검토해야 합니다. 실행 iframe은 `allow-scripts`, `allow-forms`, `allow-pointer-lock`만 허용하고 `allow-same-origin`이나 top navigation 권한은 주지 않습니다. 외부 URL의 소유/안전성이나 업로드 파일의 악성 여부를 자동으로 판별하지 않으므로 운영 검토와 별도 악성 파일 검사가 필요합니다.
+회원 제작 코드를 같은 origin에서 실행하지 마세요. Storage의 `game-builds` 공개 버킷은 게임을 iframe에서 열기 위해 공개 정적 파일 호스팅으로 쓰입니다. 업로드된 파일은 작품 승인 전에도 URL을 아는 누구나 읽을 수 있으므로 민감한 파일을 업로드하지 말고, 운영자는 승인 전에 콘텐츠를 검토해야 합니다. 업로드 제출은 `game_upload_allowlist`에 등록된, 이메일 인증을 마친 계정만 할 수 있으며 이 검사는 UI, Postgres RLS, Storage RLS에서 적용됩니다. 실행 iframe은 `allow-scripts`, `allow-forms`, `allow-pointer-lock`만 허용하고 `allow-same-origin`이나 top navigation 권한은 주지 않습니다. 외부 URL의 소유/안전성이나 업로드 파일의 악성 여부를 자동으로 판별하지 않으므로 운영 검토와 별도 악성 파일 검사가 필요합니다.
 
 ## 데이터 모델
 
