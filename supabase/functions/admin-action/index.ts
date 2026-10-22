@@ -25,6 +25,8 @@ Deno.serve(async (req) => {
       result = await admin.from('profiles').update({ account_status: body.status }).eq('id', body.target_user_id);
       if (result.error) await admin.auth.admin.updateUserById(body.target_user_id, { ban_duration: target.account_status === 'active' ? 'none' : '876000h' });
     }
+  } else if (body.action === 'resolve_report' && body.report_id && ['resolved','dismissed'].includes(body.status || '')) {
+    result = await admin.from('reports').update({ status: body.status, reviewed_by: user.id, reviewed_at: new Date().toISOString() }).eq('id', body.report_id);
   } else return Response.json({ error: 'Unsupported action or invalid input' }, { status: 400, headers: corsHeaders });
   const { error: auditError } = await admin.from('admin_audit_logs').insert({ actor_id: user.id, target_user_id: body.target_user_id ?? null, action: body.action, result: result.error ? 'failed' : 'success', details: { project_id: body.project_id ?? null, status: body.status ?? null, error: result.error?.message ?? null } });
   if (result.error) return Response.json({ error: result.error.message }, { status: 400, headers: corsHeaders });
