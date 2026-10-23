@@ -38,7 +38,7 @@ function ReportForm({projectId,session}:{projectId:string;session:Session|null})
 function Play({projects,session,profile,loading}:{projects:Project[];session:Session|null;profile:any;loading:boolean}){const {slug}=useParams(),location=useLocation();const p=projects.find(x=>x.slug===slug);if(!session)return <Navigate to="/login" state={{from:location.pathname}} replace/>;if(loading||!profile)return <div className="loading">계정 권한을 확인하는 중…</div>;if(!hasLaunchEligibility({emailVerified:Boolean(session.user.email_confirmed_at),accountActive:profile.account_status==='active'}))return <div className="empty"><Shield/><h2>계정 상태를 확인해 주세요</h2><p>계정이 활성화된 뒤 보호된 기능을 이용할 수 있습니다.</p></div>;if(!p)return <div className="empty"><h2>작품을 찾을 수 없습니다</h2><p>공개 작품이 아니거나 삭제되었습니다.</p></div>;return <LaunchFrame project={p}/>}
 function LaunchFrame({project:p}:{project:Project}){const navigate=useNavigate(),[launchUrl,setLaunchUrl]=useState(''),[failed,setFailed]=useState(false),[launching,setLaunching]=useState(true),[attempt,setAttempt]=useState(0);useEffect(()=>{let live=true;setLaunching(true);setFailed(false);void supabase!.functions.invoke('game-launch',{body:{project_id:p.id}}).then(({data,error})=>{if(!live)return;if(error||!data?.launch_url){setFailed(true)}else{try{if(!isHttpsLaunchUrl(data.launch_url))throw Error();setLaunchUrl(data.launch_url)}catch{setFailed(true)}}setLaunching(false)});return()=>{live=false}},[p.id,attempt]);return <div className="player-page"><button className="back" onClick={()=>navigate(`/project/${p.slug}`)}><ArrowLeft/> 작품으로</button><div className="player-title"><div><div className="eyebrow muted">NOW PLAYING</div><h1>{p.title}</h1></div><button className="button" onClick={()=>document.querySelector('iframe')?.requestFullscreen()}>전체 화면</button></div>{launching?<div className="loading">로그인, 인증, 작품 공개 상태와 실행 권한을 확인하는 중…</div>:failed?<div className="player-error"><h2>게임을 불러오지 못했습니다</h2><p>호스팅 주소와 iframe 허용 설정을 확인한 뒤 다시 시도해 주세요.</p><button className="button primary" onClick={()=>{setLaunchUrl('');setAttempt(attempt+1)}}>다시 시도</button></div>:<iframe key={launchUrl} title={`${p.title} 게임`} src={launchUrl} sandbox="allow-scripts allow-pointer-lock allow-forms" referrerPolicy="no-referrer" allow="fullscreen; gamepad" onError={()=>setFailed(true)}/>}</div>}
 function Auth({mode}:{mode:'login'|'signup'|'reset'}){
-  const [error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false),[verificationEmail,setVerificationEmail]=useState(''),[verificationCode,setVerificationCode]=useState('');
+  const [error,setError]=useState(''),[message,setMessage]=useState(''),[busy,setBusy]=useState(false);
   const nav=useNavigate(),loc=useLocation();
   const from=(loc.state as any)?.from||'/account';
   const title=mode==='signup'?'계정 만들기':mode==='reset'?'비밀번호 재설정':'다시 만나 반가워요';
@@ -54,11 +54,9 @@ function Auth({mode}:{mode:'login'|'signup'|'reset'}){
         if(password.length<10)throw Error('비밀번호는 10자 이상이어야 합니다.');
         if(password!==f.get('confirm'))throw Error('비밀번호 확인이 일치하지 않습니다.');
         if(!f.get('terms'))throw Error('이용약관과 개인정보 처리방침에 동의해 주세요.');
-        const {data,error:e}=await supabase.auth.signUp({email,password,options:{data:{username,display_name}}});
+        const {error:e}=await supabase.auth.signUp({email,password,options:{data:{username,display_name}}});
         if(e)throw e;
-        if(data.session){nav(from,{replace:true});return}
-        setVerificationEmail(email);
-        setMessage('이메일로 인증 코드를 보냈어요. 받은 6자리 코드를 입력해 주세요.');
+        setMessage('인증 링크를 이메일로 보냈어요. 메일의 링크를 눌러 가입을 완료해 주세요.');
       }else if(mode==='login'){
         const {data,error:e}=await supabase.auth.signInWithPassword({email,password});
         if(e){
@@ -66,8 +64,7 @@ function Auth({mode}:{mode:'login'|'signup'|'reset'}){
           if(authMessage.includes('email not confirmed')||authMessage.includes('email_not_confirmed')){
             const {error:resendError}=await supabase.auth.resend({type:'signup',email});
             if(resendError)throw resendError;
-            setVerificationEmail(email);setVerificationCode('');
-            setMessage('이메일 인증이 아직 안 됐어요. 새 인증 코드를 보냈으니 입력해 주세요.');
+            setMessage('이메일 인증이 아직 안 됐어요. 새 인증 링크를 보냈으니 메일을 확인해 주세요.');
             return;
           }
           throw e;
@@ -75,7 +72,7 @@ function Auth({mode}:{mode:'login'|'signup'|'reset'}){
         if(!data.user.email_confirmed_at){await supabase.auth.signOut();throw Error('이메일 인증을 완료한 뒤 로그인해 주세요.')}
         nav(from,{replace:true});
       }else{
-        const {error:e}=await supabase.auth.resetPasswordForEmail(email,{redirectTo:`${window.location.origin}${import.meta.env.BASE_URL}account`});
+        const {error:e}=await supabase.auth.resetPasswordForEmail(email);
         if(e)throw e;
         setMessage('계정이 존재하는 경우 비밀번호 재설정 링크를 이메일로 보냈습니다.');
       }
@@ -83,31 +80,8 @@ function Auth({mode}:{mode:'login'|'signup'|'reset'}){
     finally{setBusy(false)}
   }
 
-  async function verifyCode(e:FormEvent<HTMLFormElement>){
-    e.preventDefault();
-    if(!supabase)return;
-    setBusy(true);setError('');setMessage('');
-    try{
-      const {data,error:e}=await supabase.auth.verifyOtp({email:verificationEmail,token:verificationCode.trim(),type:'signup'});
-      if(e)throw e;
-      if(!data.user?.email_confirmed_at)throw Error('인증을 완료하지 못했어요. 코드를 다시 확인해 주세요.');
-      setMessage('이메일 인증이 완료됐어요. 계정으로 이동합니다.');
-      nav(from,{replace:true});
-    }catch(err){setError(err instanceof Error?err.message:'인증 코드를 확인하지 못했어요. 다시 시도해 주세요.')}
-    finally{setBusy(false)}
-  }
-
-  async function resendCode(){
-    if(!supabase||!verificationEmail)return;
-    setBusy(true);setError('');setMessage('');
-    try{const {error:e}=await supabase.auth.resend({type:'signup',email:verificationEmail});if(e)throw e;setMessage('새 인증 코드를 보냈어요. 받은 편지함을 확인해 주세요.')}
-    catch(err){setError(err instanceof Error?err.message:'인증 코드를 다시 보내지 못했어요.')}
-    finally{setBusy(false)}
-  }
-
-  return <div className="auth-wrap"><div className="auth-art"><div className="eyebrow"><Sparkles size={14}/> YOUR NEXT ADVENTURE</div><h2>작은 팀의 큰 상상,<br/><em>한 번의 클릭으로.</em></h2><p>새로운 세계를 만드는 창작자와<br/>플레이어를 연결합니다.</p></div><form className="auth-card" onSubmit={verificationEmail?verifyCode:submit}><div className="eyebrow muted">PLAYGROUND ACCOUNT</div><h1>{verificationEmail?'이메일 인증 코드 입력':title}</h1><p className="auth-sub">{verificationEmail?`${verificationEmail} 주소로 보낸 6자리 코드를 입력해 주세요.`:mode==='signup'?'멋진 게임 경험이 기다리고 있어요.':mode==='reset'?'가입한 이메일로 안전한 재설정 링크를 보내드립니다.':'계속하려면 로그인해 주세요.'}</p>{mode==='signup'&&!verificationEmail&&<><label>아이디<input name="username" required minLength={3} maxLength={24} pattern="[a-zA-Z0-9_]+" placeholder="영문, 숫자, 밑줄"/></label><label>닉네임<input name="display_name" required maxLength={32} placeholder="플랫폼에 표시될 이름"/></label></>}{!verificationEmail&&<label>이메일<input name="email" type="email" required autoComplete="email" placeholder="you@example.com"/></label>}{verificationEmail?<label>인증 코드<input name="token" type="text" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" minLength={6} maxLength={6} value={verificationCode} onChange={e=>setVerificationCode(e.target.value.replace(/\D/g,'').slice(0,6))} placeholder="이메일의 6자리 코드"/></label>:mode!=='reset'&&<label>비밀번호<input name="password" type="password" required autoComplete={mode==='signup'?'new-password':'current-password'} placeholder={mode==='signup'?'10자 이상':'비밀번호 입력'}/></label>}{mode==='signup'&&!verificationEmail&&<><label>비밀번호 확인<input name="confirm" type="password" required autoComplete="new-password"/></label><label className="terms-check"><input type="checkbox" name="terms"/> <span><Link to="/terms">이용약관</Link> 및 <Link to="/privacy">개인정보 처리방침</Link>에 동의합니다. (필수)</span></label></>}{error&&<p className="form-error">{error}</p>}{message&&<p className="form-success">{message}</p>}<button disabled={busy} className="button primary full">{busy?'처리 중…':verificationEmail?'코드 확인':mode==='signup'?'가입하고 코드 받기':mode==='reset'?'재설정 링크 보내기':'로그인'} <ArrowRight size={16}/></button>{verificationEmail&&<button type="button" disabled={busy} className="text-button" onClick={()=>void resendCode()}>코드 다시 보내기</button>}<div className="auth-links">{mode==='login'?<><Link to="/reset">비밀번호를 잊으셨나요?</Link><span>계정이 없나요? <Link to="/signup">회원가입</Link></span></>:<span>이미 계정이 있나요? <Link to="/login">로그인</Link></span>}</div></form></div>
-}
-function Account({session,profile,reload}:{session:Session;profile:any;reload:()=>Promise<void>}){const [msg,setMsg]=useState('');async function rename(e:FormEvent<HTMLFormElement>){e.preventDefault();const d=String(new FormData(e.currentTarget).get('display_name')).trim();const {error}=await supabase!.from('profiles').update({display_name:d}).eq('id',session.user.id);setMsg(error?.message||'프로필을 저장했습니다.');await reload()}async function changePassword(e:FormEvent<HTMLFormElement>){e.preventDefault();const d=new FormData(e.currentTarget),p=String(d.get('password'));if(p.length<10){setMsg('새 비밀번호는 10자 이상이어야 합니다.');return}const {error}=await supabase!.auth.updateUser({password:p});setMsg(error?.message||'비밀번호를 변경했습니다.')}return <div className="page-wrap account"><div className="eyebrow muted">ACCOUNT SETTINGS</div><h1>계정 설정</h1><div className="settings-grid"><section className="settings-card"><UserRound/><h2>프로필</h2><p>로그인한 회원님의 공개 프로필 정보입니다.</p><form onSubmit={rename}><label>아이디<input value={profile?.username||''} disabled/></label><label>닉네임<input name="display_name" defaultValue={profile?.display_name||''} required maxLength={32}/></label><button className="button primary">변경 저장</button></form></section><section className="settings-card"><Shield/><h2>보안</h2><p>이메일 인증: {session.user.email_confirmed_at?'완료':'미완료'}<br/>계정 상태: {profile?.account_status||'확인 중'}</p><form onSubmit={changePassword}><label>새 비밀번호<input name="password" type="password" required minLength={10} autoComplete="new-password"/></label><button className="button">비밀번호 변경</button></form><button className="text-button" onClick={async()=>{await supabase!.auth.signOut({scope:'global'});window.location.assign(import.meta.env.BASE_URL)}}>모든 기기에서 로그아웃</button></section></div>{msg&&<p className="form-success">{msg}</p>}</div>}
+  return <div className="auth-wrap"><div className="auth-art"><div className="eyebrow"><Sparkles size={14}/> YOUR NEXT ADVENTURE</div><h2>작은 팀의 큰 상상,<br/><em>한 번의 클릭으로.</em></h2><p>새로운 세계를 만드는 창작자와<br/>플레이어를 연결합니다.</p></div><form className="auth-card" onSubmit={submit}><div className="eyebrow muted">PLAYGROUND ACCOUNT</div><h1>{title}</h1><p className="auth-sub">{mode==='signup'?'멋진 게임 경험이 기다리고 있어요.':mode==='reset'?'가입한 이메일로 안전한 재설정 링크를 보내드립니다.':'계속하려면 로그인해 주세요.'}</p>{mode==='signup'&&<><label>아이디<input name="username" required minLength={3} maxLength={24} pattern="[a-zA-Z0-9_]+" placeholder="영문, 숫자, 밑줄"/></label><label>닉네임<input name="display_name" required maxLength={32} placeholder="플랫폼에 표시될 이름"/></label></>}<label>이메일<input name="email" type="email" required autoComplete="email" placeholder="you@example.com"/></label>{mode!=='reset'&&<label>비밀번호<input name="password" type="password" required autoComplete={mode==='signup'?'new-password':'current-password'} placeholder={mode==='signup'?'10자 이상':'비밀번호 입력'}/></label>}{mode==='signup'&&<><label>비밀번호 확인<input name="confirm" type="password" required autoComplete="new-password"/></label><label className="terms-check"><input type="checkbox" name="terms"/> <span><Link to="/terms">이용약관</Link> 및 <Link to="/privacy">개인정보 처리방침</Link>에 동의합니다. (필수)</span></label></>}{error&&<p className="form-error">{error}</p>}{message&&<p className="form-success">{message}</p>}<button disabled={busy} className="button primary full">{busy?'처리 중…':mode==='signup'?'가입하고 인증 메일 받기':mode==='reset'?'재설정 링크 보내기':'로그인'} <ArrowRight size={16}/></button><div className="auth-links">{mode==='login'?<><Link to="/reset">비밀번호를 잊으셨나요?</Link><span>계정이 없나요? <Link to="/signup">회원가입</Link></span></>:<span>이미 계정이 있나요? <Link to="/login">로그인</Link></span>}</div></form></div>
+}function Account({session,profile,reload}:{session:Session;profile:any;reload:()=>Promise<void>}){const [msg,setMsg]=useState('');async function rename(e:FormEvent<HTMLFormElement>){e.preventDefault();const d=String(new FormData(e.currentTarget).get('display_name')).trim();const {error}=await supabase!.from('profiles').update({display_name:d}).eq('id',session.user.id);setMsg(error?.message||'프로필을 저장했습니다.');await reload()}async function changePassword(e:FormEvent<HTMLFormElement>){e.preventDefault();const d=new FormData(e.currentTarget),p=String(d.get('password'));if(p.length<10){setMsg('새 비밀번호는 10자 이상이어야 합니다.');return}const {error}=await supabase!.auth.updateUser({password:p});setMsg(error?.message||'비밀번호를 변경했습니다.')}return <div className="page-wrap account"><div className="eyebrow muted">ACCOUNT SETTINGS</div><h1>계정 설정</h1><div className="settings-grid"><section className="settings-card"><UserRound/><h2>프로필</h2><p>로그인한 회원님의 공개 프로필 정보입니다.</p><form onSubmit={rename}><label>아이디<input value={profile?.username||''} disabled/></label><label>닉네임<input name="display_name" defaultValue={profile?.display_name||''} required maxLength={32}/></label><button className="button primary">변경 저장</button></form></section><section className="settings-card"><Shield/><h2>보안</h2><p>이메일 인증: {session.user.email_confirmed_at?'완료':'미완료'}<br/>계정 상태: {profile?.account_status||'확인 중'}</p><form onSubmit={changePassword}><label>새 비밀번호<input name="password" type="password" required minLength={10} autoComplete="new-password"/></label><button className="button">비밀번호 변경</button></form><button className="text-button" onClick={async()=>{await supabase!.auth.signOut({scope:'global'});window.location.assign(import.meta.env.BASE_URL)}}>모든 기기에서 로그아웃</button></section></div>{msg&&<p className="form-success">{msg}</p>}</div>}
 const MAX_GAME_FILES = 500;
 const MAX_GAME_FILE_BYTES = 50 * 1024 * 1024;
 const MAX_GAME_TOTAL_BYTES = 200 * 1024 * 1024;
