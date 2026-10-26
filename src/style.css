@@ -8,3 +8,27 @@
 .admin-heading{margin-top:32px;font-size:17px}.admin-heading small{display:block;font-size:10px;color:#91909a;font-weight:400;margin-top:5px}.member-handle{color:#a5a3ad;font-size:10px;font-weight:400}
 .creator-form input[type=file]{height:auto;padding:10px;border:1px dashed #514654;background:#14151a;color:#c5c0ca}.creator-form small{display:block;color:#91e7c2;font-size:10px}.upload-note{font-size:10px!important;color:#aaa5b2!important;line-height:1.7!important;margin:0 0 12px!important}
 .upload-help{display:block;color:#b8aebe;font-size:10px;line-height:1.7;margin-top:2px}
+
+/* Mobile usability refinements */
+@media(max-width:720px){
+  .sidebar{z-index:60;padding-top:max(18px,env(safe-area-inset-top));padding-bottom:max(16px,env(safe-area-inset-bottom))}
+  .nav-backdrop{display:block;position:fixed;inset:0;z-index:55;border:0;background:#050509a8;backdrop-filter:blur(2px)}
+  .topbar{padding-left:max(12px,env(safe-area-inset-left));padding-right:max(12px,env(safe-area-inset-right))}
+  .icon-button,.filters button,.button,.navlink{min-height:44px}
+  .top-right{gap:4px}.content{padding-left:max(14px,env(safe-area-inset-left));padding-right:max(14px,env(safe-area-inset-right))}
+  .game-grid{grid-template-columns:minmax(0,1fr)}.game-card{min-width:0}.game-card h3,.game-card p{overflow-wrap:anywhere}
+  .creator-form,.auth-card,.page-wrap,.settings-grid>*{min-width:0;max-width:100%}
+  .creator-form input:not([type=file]),.creator-form select,.creator-form textarea,.auth-card input,.searchbox input{font-size:16px}
+  .creator-form .button,.auth-card .button,.row-actions .button{min-height:44px}
+  .report-row,.activity-row{flex-wrap:wrap}.row-actions{width:100%;flex-wrap:wrap}.row-actions .button{flex:1}
+  .player-page{height:calc(100dvh - 118px);min-height:340px}.player-title{gap:10px}.player-title .button{min-height:42px;padding:8px 11px}
+  .detail-layout{min-width:0}.detail-info>*{min-width:0;overflow-wrap:anywhere}
+}
+@media(max-width:420px){
+  .topbar{height:56px;gap:7px}.crumb{max-width:34vw;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .hero{height:290px;padding:21px 18px}.hero h1{font-size:28px}.hero-art{left:25%;opacity:.42}
+  .cover{height:165px}.detail-cover{height:190px}.detail-cover h1{font-size:25px}
+  .auth-card{padding:22px 16px}.creator-hero{padding:18px 14px;align-items:flex-start}.admin-row{flex-wrap:wrap}
+  footer{padding-bottom:max(13px,env(safe-area-inset-bottom))}
+}
+@media(max-width:720px) and (orientation:landscape){.player-page{height:calc(100dvh - 100px);min-height:260px}.player-title{padding-top:7px;padding-bottom:7px}}
