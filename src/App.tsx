@@ -132,27 +132,32 @@ function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){
   async function submit(e:FormEvent<HTMLFormElement>){
     e.preventDefault();
     if(!supabase){setMessage('Supabase 설정을 먼저 완료해 주세요.');return}
-    setBusy(true);setMessage('');
-    const {data:allowed,error:permissionError}=await supabase.rpc('can_upload_games');
-    if(permissionError||allowed!==true){setMessage('허용 목록에 등록되고 이메일 인증을 마친 계정만 작품을 제출할 수 있어요.');setBusy(false);return}
     const formElement=e.currentTarget,form=new FormData(formElement),input=formElement.elements.namedItem('game_files') as HTMLInputElement;
-    const title=String(form.get('title')).trim(),slug=String(form.get('slug')).trim().toLowerCase(),url=String(form.get('launch_url')).trim(),version=String(form.get('version')||'1.0.0');
-    let entries:{file:File;path:string}[]=[];
+    setBusy(true);setMessage('업로드 권한을 확인하고 있어요…');
+    let projectId:string|undefined;
+    const uploadedPaths:string[]=[];
     try {
+      const {data:allowed,error:permissionError}=await supabase.rpc('can_upload_games');
+      if(permissionError)throw permissionError;
+      if(allowed!==true)throw new Error('허용 목록에 등록되고 이메일 인증을 마친 계정만 작품을 제출할 수 있어요.');
+      const title=String(form.get('title')).trim(),slug=String(form.get('slug')).trim().toLowerCase(),url=String(form.get('launch_url')).trim(),version=String(form.get('version')||'1.0.0');
+      let entries:{file:File;path:string}[]=[];
       entries=getGameFileEntries(input.files);
       if(url&&entries.length)throw new Error('게임 폴더 업로드와 외부 URL 중 하나만 선택해 주세요.');
       if(!url&&!entries.length)throw new Error('게임 폴더를 선택하거나 외부 HTTPS 실행 주소를 입력해 주세요.');
       if(url&&new URL(url).protocol!=='https:')throw new Error('실행 주소는 올바른 HTTPS URL이어야 합니다.');
-    } catch(err) {setMessage(err instanceof Error?err.message:'입력한 게임 정보를 확인해 주세요.');setBusy(false);return}
-
-    const {data:project,error}=await supabase.from('projects').insert({owner_id:session.user.id,title,slug,description:String(form.get('description')),category:String(form.get('category')),version,visibility:'private',moderation_status:'review'}).select('id').single();
-    if(error||!project){setMessage(error?.message||'작품을 만들지 못했습니다.');setBusy(false);return}
-
-    const uploadedPaths:string[]=[];
-    try {
+      if(entries.length===1&&entries[0].path.toLowerCase()==='index.html'){
+        const html=await entries[0].file.text();
+        if(html.includes('/src/main.tsx')||html.includes('id="root"'))throw new Error('선택한 파일은 게임이 아니라 PLAYGROUND 홈페이지 파일이에요. 게임 폴더를 선택하거나 게임 자체의 HTTPS 실행 주소를 입력해 주세요.');
+      }
+      setMessage('작품 정보를 저장하고 있어요…');
+      const {data:project,error}=await supabase.from('projects').insert({owner_id:session.user.id,title,slug,description:String(form.get('description')),category:String(form.get('category')),version,visibility:'private',moderation_status:'review'}).select('id').single();
+      if(error||!project)throw error||new Error('작품 정보를 저장하지 못했습니다.');
+      projectId=project.id;
       let launchUrl=url;
       if(entries.length){
         const storage=supabase.storage.from('game-builds');
+        let completed=0;
         for(let offset=0;offset<entries.length;offset+=4){
           const batch=entries.slice(offset,offset+4);
           const results=await Promise.allSettled(batch.map(async entry=>{
@@ -160,27 +165,29 @@ function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){
             uploadedPaths.push(path);
             const {error:uploadError}=await storage.upload(path,entry.file,{contentType:contentTypeFor(entry.file,entry.path),cacheControl:'3600',upsert:false});
             if(uploadError)throw uploadError;
+            completed+=1;
+            setMessage(`게임 파일 업로드 중… ${completed} / ${entries.length}개 완료`);
             return path;
           }));
           const failed=results.find(result=>result.status==='rejected');
           if(failed?.status==='rejected')throw failed.reason;
-          setMessage(`게임 파일 업로드 중… ${Math.min(offset+batch.length,entries.length)} / ${entries.length}`);
         }
         launchUrl=storage.getPublicUrl(`${session.user.id}/${project.id}/index.html`).data.publicUrl;
       }
+      setMessage('검토 요청을 마무리하고 있어요…');
       const {error:buildError}=await supabase.from('project_builds').insert({project_id:project.id,version,build_type:'html5',launch_url:launchUrl,storage_path:entries.length?`${session.user.id}/${project.id}`:null});
       if(buildError)throw buildError;
       setMessage('검토 요청을 제출했습니다. 운영자 승인 후 공개됩니다.');
       formElement.reset();setSelectedCount(0);setSelectedSize(0);await reload();
     } catch(err) {
       if(uploadedPaths.length)await supabase.storage.from('game-builds').remove(uploadedPaths);
-      await supabase.from('projects').delete().eq('id',project.id);
+      if(projectId)await supabase.from('projects').delete().eq('id',projectId);
       setMessage(err instanceof Error?`업로드를 완료하지 못했습니다: ${err.message}`:'업로드를 완료하지 못했습니다. 설정과 네트워크를 확인해 주세요.');
     } finally {setBusy(false)}
   }
   if(canSubmit===null)return <div className="page-wrap"><div className="loading">업로드 권한을 확인하고 있어요…</div></div>;
   if(!canSubmit)return <div className="page-wrap"><div className="empty"><Sparkles/><h2>작품 등록 권한이 없어요</h2><p>운영자가 허용 목록에 등록한 이메일로 가입하고 인증해야 업로드할 수 있습니다.</p></div></div>;
-  return <div className="page-wrap account"><div className="eyebrow muted">CREATOR STUDIO</div><h1>작품 등록</h1><MySubmissions ownerId={session.user.id}/><p className="muted">HTML5 게임 폴더를 올리거나 외부 HTTPS 주소를 등록할 수 있어요. 업로드 폴더의 최상위에 index.html이 있어야 합니다. 제출한 작품은 운영자 승인 후 공개됩니다.</p><form className="settings-card creator-form" onSubmit={submit}><label>작품 제목<input name="title" required maxLength={100}/></label><label>고유 슬러그<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80} placeholder="my-game"/></label><label>카테고리<select name="category">{categories.slice(1).map(c=><option key={c}>{c}</option>)}</select></label><label>버전<input name="version" defaultValue="1.0.0" required/></label><label>작품 설명<textarea name="description" required maxLength={10000}/></label><label>게임 폴더 업로드 (HTML5)<input name="game_files" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB 선택됨 (최대 500개, 전체 200MB)</small>}</label><label>또는 외부 브라우저 실행 URL (HTTPS)<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><p className="upload-note">Supabase Storage 업로드는 파일당 50MB, 전체 200MB까지 지원합니다. 업로드된 게임 파일은 공개 URL로 제공되며, 폴더의 하위 경로와 파일 이름은 유지됩니다.</p><button className="button primary" disabled={busy}>{busy?'업로드 중…':'검토 요청 제출'}</button>{message&&<p className="form-success">{message}</p>}</form></div>
+  return <div className="page-wrap account"><div className="eyebrow muted">CREATOR STUDIO</div><h1>작품 등록</h1><MySubmissions ownerId={session.user.id}/><p className="muted">게임 폴더를 선택하거나 외부 HTTPS 실행 주소를 입력하세요. ZIP 파일은 먼저 압축을 푼 뒤 폴더를 선택하면 됩니다. 게임 폴더 최상위에 게임용 index.html이 있어야 해요. 제출한 작품은 운영자 승인 후 공개됩니다.</p><form className="settings-card creator-form" onSubmit={submit}><label>작품 제목<input name="title" required maxLength={100}/></label><label>고유 슬러그<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80} placeholder="my-game"/></label><label>카테고리<select name="category">{categories.slice(1).map(c=><option key={c}>{c}</option>)}</select></label><label>버전<input name="version" defaultValue="1.0.0" required/></label><label>작품 설명<textarea name="description" required maxLength={10000}/></label><label>게임 폴더 선택 (HTML5)<input name="game_files" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB 선택됨 (최대 500개, 전체 200MB)</small>}<span className="upload-help">버튼을 눌러 게임이 들어 있는 폴더를 고르세요. index.html 파일 하나만 선택하지 마세요.</span></label><label>또는 외부 브라우저 실행 URL (HTTPS)<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><p className="upload-note">파일당 50MB, 전체 200MB까지 지원해요. 업로드가 시작되면 완료된 파일 수가 표시됩니다.</p><button className="button primary" disabled={busy}>{busy?'처리 중…':'검토 요청 제출'}</button>{message&&<p className={message.includes('완료하지 못했습니다')?'form-error':'form-success'} role="status">{message}</p>}</form></div>
 }
 function MySubmissions({ownerId}:{ownerId:string}){const [items,setItems]=useState<Project[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState('');useEffect(()=>{let live=true;void supabase!.from('projects').select('id,owner_id,slug,title,description,category,version,visibility,moderation_status,cover_url,created_at').eq('owner_id',ownerId).order('updated_at',{ascending:false}).then(({data,error:e})=>{if(!live)return;setItems((data||[]) as Project[]);setError(e?.message||'');setLoading(false)});return()=>{live=false}},[ownerId]);return <section className="submission-panel"><h2>내 작품 상태</h2>{loading?<p className="muted">작품을 불러오는 중…</p>:error?<p className="form-error">{error}</p>:items.length?<div className="activity-list">{items.map(p=><div className="activity-row" key={p.id}><span className="avatar"><Gamepad2 size={16}/></span><span><b>{p.title}</b><small>{p.category} · v{p.version} · {new Date(p.created_at).toLocaleDateString('ko-KR')}</small></span><span className={`status-pill status-${p.moderation_status}`}>{projectStatusLabel(p.moderation_status)}</span>{p.moderation_status==='published'&&<Link to={`/project/${p.slug}`} aria-label={`${p.title} 보기`}><ArrowRight size={16}/></Link>}</div>)}</div>:<p className="muted">아직 제출한 작품이 없습니다. 첫 게임을 올려보세요.</p>}</section>}
 
