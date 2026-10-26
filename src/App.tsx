@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { Link, Navigate, Route, Routes, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Bell, Compass, FileText, Gamepad2, Heart, History, LayoutDashboard, LogIn, LogOut, Menu, Search, Shield, Sparkles, UserRound, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Bell, Compass, FileText, Gamepad2, Heart, History, LayoutDashboard, LogIn, LogOut, Menu, Search, Shield, Sparkles, Trash2, UserRound, X } from 'lucide-react';
 import { configured, supabase, supabaseProjectUrl } from './supabase';
 import type { Project } from './types';
 import { hasLaunchEligibility, isHttpsLaunchUrl } from './security';
@@ -195,8 +195,41 @@ function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){
   if(!canSubmit)return <div className="page-wrap"><div className="empty"><Sparkles/><h2>작품 등록 권한이 없어요</h2><p>운영자가 허용 목록에 등록한 이메일로 가입하고 인증해야 업로드할 수 있습니다.</p></div></div>;
   return <div className="page-wrap account"><div className="eyebrow muted">CREATOR STUDIO</div><h1>작품 등록</h1><MySubmissions ownerId={session.user.id}/><p className="muted">게임 폴더, 단일 HTML 파일 또는 외부 HTTPS 실행 주소로 작품을 등록할 수 있어요. 제출하면 바로 공개됩니다.</p><form className="settings-card creator-form" onSubmit={submit}><label>작품 제목<input name="title" required maxLength={100}/></label><label>고유 슬러그<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80} placeholder="my-game"/></label><label>카테고리<select name="category">{categories.slice(1).map(c=><option key={c}>{c}</option>)}</select></label><label>버전<input name="version" defaultValue="1.0.0" required/></label><label>작품 설명<textarea name="description" required maxLength={10000}/></label><label>게임 폴더 업로드 (HTML5)<input name="game_files_folder" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);const other=event.currentTarget.form?.elements.namedItem('game_file_html') as HTMLInputElement|null;if(files.length&&other)other.value='';setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB 선택됨 (최대 500개, 전체 200MB)</small>}<span className="upload-help">게임 폴더 전체를 선택하세요.</span></label><label>또는 HTML 파일 하나만 업로드<input name="game_file_html" type="file" accept=".html,.htm,text/html" onChange={event=>{const file=event.currentTarget.files?.[0];const other=event.currentTarget.form?.elements.namedItem('game_files_folder') as HTMLInputElement|null;if(file&&other)other.value='';setSelectedCount(file?1:0);setSelectedSize(file?.size||0)}}/><span className="upload-help">한 파일 안에 게임 코드가 모두 포함된 HTML 파일을 선택하세요. 다른 이미지나 스크립트 파일도 필요한 게임은 폴더 업로드를 사용하세요.</span></label><label>또는 외부 브라우저 실행 URL (HTTPS)<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><p className="upload-note">파일당 50MB, 전체 200MB까지 지원해요. 제출한 작품은 자동으로 공개됩니다.</p><button className="button primary" disabled={busy}>{busy?'처리 중…':'작품 공개하기'}</button>{message&&<p className={message.includes('공개되었습니다')?'form-success':'form-error'} role="status">{message}</p>}</form></div>
 }
-function MySubmissions({ownerId}:{ownerId:string}){const [items,setItems]=useState<Project[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState('');useEffect(()=>{let live=true;void supabase!.from('projects').select('id,owner_id,slug,title,description,category,version,visibility,moderation_status,cover_url,created_at').eq('owner_id',ownerId).order('updated_at',{ascending:false}).then(({data,error:e})=>{if(!live)return;setItems((data||[]) as Project[]);setError(e?.message||'');setLoading(false)});return()=>{live=false}},[ownerId]);return <section className="submission-panel"><h2>내 작품 상태</h2>{loading?<p className="muted">작품을 불러오는 중…</p>:error?<p className="form-error">{error}</p>:items.length?<div className="activity-list">{items.map(p=><div className="activity-row" key={p.id}><span className="avatar"><Gamepad2 size={16}/></span><span><b>{p.title}</b><small>{p.category} · v{p.version} · {new Date(p.created_at).toLocaleDateString('ko-KR')}</small></span><span className={`status-pill status-${p.moderation_status}`}>{projectStatusLabel(p.moderation_status)}</span>{p.moderation_status==='published'&&<Link to={`/project/${p.slug}`} aria-label={`${p.title} 보기`}><ArrowRight size={16}/></Link>}</div>)}</div>:<p className="muted">아직 제출한 작품이 없습니다. 첫 게임을 올려보세요.</p>}</section>}
-
+function MySubmissions({ownerId}:{ownerId:string}){
+  const [items,setItems]=useState<Project[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState(''),[busy,setBusy]=useState('');
+  const load=async()=>{const {data,error:e}=await supabase!.from('projects').select('id,owner_id,slug,title,description,category,version,visibility,moderation_status,cover_url,created_at').eq('owner_id',ownerId).order('updated_at',{ascending:false});setItems((data||[]) as Project[]);setError(e?.message||'');setLoading(false)};
+  useEffect(()=>{void load()},[ownerId]);
+  async function removeProject(project:Project){
+    if(!confirm(`“${project.title}” 작품과 업로드 파일을 영구 삭제할까요? 이 작업은 되돌릴 수 없습니다.`))return;
+    setBusy(project.id);setError('');
+    try{
+      const storage=supabase!.storage.from('game-builds');
+      const folder=`${ownerId}/${project.id}`;
+      const listFiles=async(path:string):Promise<string[]>=>{
+        const paths:string[]=[];
+        for(let offset=0;;offset+=100){
+          const {data,error:e}=await storage.list(path,{limit:100,offset});
+          if(e)throw e;
+          const entries=data||[];
+          for(const item of entries){
+            const child=`${path}/${item.name}`;
+            if(item.id===null)paths.push(...await listFiles(child));else paths.push(child);
+          }
+          if(entries.length<100)break;
+        }
+        return paths;
+      };
+      const files=await listFiles(folder);
+      for(let offset=0;offset<files.length;offset+=100){const {error:e}=await storage.remove(files.slice(offset,offset+100));if(e)throw e;}
+      const {data,error:e}=await supabase!.from('projects').delete().eq('id',project.id).eq('owner_id',ownerId).select('id');
+      if(e)throw e;
+      if(!data?.length)throw new Error('삭제 권한이 없거나 작품을 찾지 못했습니다. Supabase 마이그레이션 005 적용 여부를 확인해 주세요.');
+      setItems(current=>current.filter(item=>item.id!==project.id));
+    }catch(err){setError(err instanceof Error?`작품을 삭제하지 못했습니다: ${err.message}`:'작품을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');}
+    finally{setBusy('');}
+  }
+  return <section className="submission-panel"><h2>내 작품 관리</h2>{loading?<p className="muted">작품을 불러오는 중…</p>:error&&items.length===0?<p className="form-error">{error}</p>:items.length?<><div className="activity-list">{items.map(p=><div className="activity-row" key={p.id}><span className="avatar"><Gamepad2 size={16}/></span><span><b>{p.title}</b><small>{p.category} · v{p.version} · {new Date(p.created_at).toLocaleDateString('ko-KR')}</small></span><span className={`status-pill status-${p.moderation_status}`}>{projectStatusLabel(p.moderation_status)}</span>{p.moderation_status==='published'&&<Link to={`/project/${p.slug}`} aria-label={`${p.title} 보기`}><ArrowRight size={16}/></Link>}<button className="button button-danger" disabled={busy===p.id||!!busy} onClick={()=>void removeProject(p)} aria-label={`${p.title} 삭제`}><Trash2 size={15}/><span>{busy===p.id?'삭제 중…':'삭제'}</span></button></div>)}</div>{error&&<p className="form-error">{error}</p>}</>:<p className="muted">아직 제출한 작품이 없습니다. 첫 게임을 올려보세요.</p>}</section>
+}
 function projectStatusLabel(status:string){return ({draft:'초안',review:'검토 중',published:'공개',suspended:'비공개/정지',pending_deletion:'삭제 대기'} as Record<string,string>)[status]||status}
 
 function AdminCore({reload}:{reload:()=>Promise<void>}){const [busy,setBusy]=useState(''),[projects,setProjects]=useState<Project[]>([]),[members,setMembers]=useState<any[]>([]);const load=async()=>{const [p,u]=await Promise.all([supabase!.from('projects').select('id,owner_id,slug,title,description,category,version,visibility,moderation_status,cover_url,created_at').in('moderation_status',['review','published','suspended']).order('created_at',{ascending:false}),supabase!.from('profiles').select('id,username,display_name,role,account_status,created_at').order('created_at',{ascending:false}).limit(100)]);setProjects((p.data||[]) as Project[]);setMembers(u.data||[])};useEffect(()=>{void load()},[]);async function act(action:string,id:string,status:string,label:string){if(!confirm(`${label} 처리할까요?`))return;setBusy(id);const {error}=await supabase!.functions.invoke('admin-action',{body:{action,project_id:action==='set_project_status'?id:undefined,target_user_id:action==='set_account_status'?id:undefined,status}});if(error)alert(error.message);else await reload();await load();setBusy('')}return <div className="page-wrap"><div className="eyebrow muted">ADMIN CONSOLE</div><h1>운영 대시보드</h1><h2>작품 검토</h2><p className="muted">승인 작품은 공개됩니다. 정지하면 새 공개 조회가 차단됩니다.</p><div className="admin-table">{projects.length?projects.map(p=><div className="admin-row" key={p.id}><div><b>{p.title}</b><small>{p.slug} · {p.category} · {p.moderation_status}</small></div><button disabled={busy===p.id} className="button" onClick={()=>void act('set_project_status',p.id,p.moderation_status==='published'?'suspended':'published',p.moderation_status==='published'?'비공개':'공개')}>{p.moderation_status==='published'?'비공개 처리':'공개 승인'}</button></div>):<div className="empty">검토할 작품이 없습니다.</div>}</div><h2 className="admin-heading">회원 관리 <small>최대 최근 100명 · 이메일은 표시하지 않습니다</small></h2><div className="admin-table">{members.length?members.map(u=><div className="admin-row" key={u.id}><div><b>{u.display_name} <span className="member-handle">@{u.username}</span></b><small>{u.id} · {u.role} · {u.account_status} · {new Date(u.created_at).toLocaleDateString('ko-KR')}</small></div>{u.role!=='admin'&&<button disabled={busy===u.id} className="button" onClick={()=>void act('set_account_status',u.id,u.account_status==='suspended'?'active':'suspended',u.account_status==='suspended'?'정지 해제':'계정 정지')}>{u.account_status==='suspended'?'정지 해제':'계정 정지'}</button>}</div>):<div className="empty">회원이 없습니다.</div>}</div><p className="note">계정 정지는 Auth의 신규 로그인/토큰 갱신을 막고 RLS의 활성 상태 검사로 보호된 데이터 요청을 차단합니다. 이미 발행된 JWT는 만료 전까지 보호된 데이터베이스 접근에서 상태를 확인해야 합니다.</p></div>}

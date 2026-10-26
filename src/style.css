@@ -32,3 +32,9 @@
   footer{padding-bottom:max(13px,env(safe-area-inset-bottom))}
 }
 @media(max-width:720px) and (orientation:landscape){.player-page{height:calc(100dvh - 100px);min-height:260px}.player-title{padding-top:7px;padding-bottom:7px}}
+
+.button-danger{border-color:#69404b;background:#321d25;color:#ffb2bc}
+.button-danger:hover{border-color:#b85b70;background:#48212d}
+.submission-panel .activity-row{gap:10px}
+.submission-panel .activity-row .button-danger{margin-left:auto;flex:none}
+@media(max-width:720px){.submission-panel .activity-row .button-danger{width:100%;margin-left:0}.submission-panel .status-pill{margin-left:auto}}
