@@ -132,7 +132,7 @@ function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){
   async function submit(e:FormEvent<HTMLFormElement>){
     e.preventDefault();
     if(!supabase){setMessage('Supabase 설정을 먼저 완료해 주세요.');return}
-    const formElement=e.currentTarget,form=new FormData(formElement),input=formElement.elements.namedItem('game_files') as HTMLInputElement;
+    const formElement=e.currentTarget,form=new FormData(formElement),folderInput=formElement.elements.namedItem('game_files_folder') as HTMLInputElement,htmlInput=formElement.elements.namedItem('game_file_html') as HTMLInputElement;
     setBusy(true);setMessage('업로드 권한을 확인하고 있어요…');
     let projectId:string|undefined;
     const uploadedPaths:string[]=[];
@@ -141,15 +141,17 @@ function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){
       if(permissionError)throw permissionError;
       if(allowed!==true)throw new Error('허용 목록에 등록되고 이메일 인증을 마친 계정만 작품을 제출할 수 있어요.');
       const title=String(form.get('title')).trim(),slug=String(form.get('slug')).trim().toLowerCase(),url=String(form.get('launch_url')).trim(),version=String(form.get('version')||'1.0.0');
-      let entries:{file:File;path:string}[]=[];
-      entries=getGameFileEntries(input.files);
-      if(url&&entries.length)throw new Error('게임 폴더 업로드와 외부 URL 중 하나만 선택해 주세요.');
-      if(!url&&!entries.length)throw new Error('게임 폴더를 선택하거나 외부 HTTPS 실행 주소를 입력해 주세요.');
-      if(url&&new URL(url).protocol!=='https:')throw new Error('실행 주소는 올바른 HTTPS URL이어야 합니다.');
-      if(entries.length===1&&entries[0].path.toLowerCase()==='index.html'){
-        const html=await entries[0].file.text();
-        if(html.includes('/src/main.tsx')||html.includes('id="root"'))throw new Error('선택한 파일은 게임이 아니라 PLAYGROUND 홈페이지 파일이에요. 게임 폴더를 선택하거나 게임 자체의 HTTPS 실행 주소를 입력해 주세요.');
+      if(folderInput.files?.length&&htmlInput.files?.length)throw new Error('게임 폴더 또는 단일 HTML 파일 중 하나만 선택해 주세요.');
+      let entries:{file:File;path:string}[]=folderInput.files?.length?getGameFileEntries(folderInput.files):[];
+      if(htmlInput.files?.length){
+        const file=htmlInput.files[0];
+        if(!/\.html?$/i.test(file.name))throw new Error('단일 파일 업로드는 .html 파일만 선택할 수 있어요.');
+        if(file.size>MAX_GAME_FILE_BYTES)throw new Error('개별 파일은 50MB 이하여야 해요.');
+        entries=[{file,path:'index.html'}];
       }
+      if(url&&entries.length)throw new Error('게임 폴더, 단일 HTML 파일 또는 외부 URL 중 하나만 선택해 주세요.');
+      if(!url&&!entries.length)throw new Error('게임 폴더, 단일 HTML 파일 또는 외부 HTTPS 실행 주소를 입력해 주세요.');
+      if(url&&new URL(url).protocol!=='https:')throw new Error('실행 주소는 올바른 HTTPS URL이어야 합니다.');
       setMessage('작품 정보를 저장하고 있어요…');
       const {data:project,error}=await supabase.from('projects').insert({owner_id:session.user.id,title,slug,description:String(form.get('description')),category:String(form.get('category')),version,visibility:'private',moderation_status:'review'}).select('id').single();
       if(error||!project)throw error||new Error('작품 정보를 저장하지 못했습니다.');
@@ -187,7 +189,7 @@ function Developer({session,reload}:{session:Session;reload:()=>Promise<void>}){
   }
   if(canSubmit===null)return <div className="page-wrap"><div className="loading">업로드 권한을 확인하고 있어요…</div></div>;
   if(!canSubmit)return <div className="page-wrap"><div className="empty"><Sparkles/><h2>작품 등록 권한이 없어요</h2><p>운영자가 허용 목록에 등록한 이메일로 가입하고 인증해야 업로드할 수 있습니다.</p></div></div>;
-  return <div className="page-wrap account"><div className="eyebrow muted">CREATOR STUDIO</div><h1>작품 등록</h1><MySubmissions ownerId={session.user.id}/><p className="muted">게임 폴더를 선택하거나 외부 HTTPS 실행 주소를 입력하세요. ZIP 파일은 먼저 압축을 푼 뒤 폴더를 선택하면 됩니다. 게임 폴더 최상위에 게임용 index.html이 있어야 해요. 제출한 작품은 운영자 승인 후 공개됩니다.</p><form className="settings-card creator-form" onSubmit={submit}><label>작품 제목<input name="title" required maxLength={100}/></label><label>고유 슬러그<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80} placeholder="my-game"/></label><label>카테고리<select name="category">{categories.slice(1).map(c=><option key={c}>{c}</option>)}</select></label><label>버전<input name="version" defaultValue="1.0.0" required/></label><label>작품 설명<textarea name="description" required maxLength={10000}/></label><label>게임 폴더 선택 (HTML5)<input name="game_files" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB 선택됨 (최대 500개, 전체 200MB)</small>}<span className="upload-help">버튼을 눌러 게임이 들어 있는 폴더를 고르세요. index.html 파일 하나만 선택하지 마세요.</span></label><label>또는 외부 브라우저 실행 URL (HTTPS)<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><p className="upload-note">파일당 50MB, 전체 200MB까지 지원해요. 업로드가 시작되면 완료된 파일 수가 표시됩니다.</p><button className="button primary" disabled={busy}>{busy?'처리 중…':'검토 요청 제출'}</button>{message&&<p className={message.includes('완료하지 못했습니다')?'form-error':'form-success'} role="status">{message}</p>}</form></div>
+  return <div className="page-wrap account"><div className="eyebrow muted">CREATOR STUDIO</div><h1>작품 등록</h1><MySubmissions ownerId={session.user.id}/><p className="muted">게임 폴더, 단일 HTML 파일 또는 외부 HTTPS 실행 주소로 작품을 등록할 수 있어요. 제출한 작품은 운영자 승인 후 공개됩니다.</p><form className="settings-card creator-form" onSubmit={submit}><label>작품 제목<input name="title" required maxLength={100}/></label><label>고유 슬러그<input name="slug" required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80} placeholder="my-game"/></label><label>카테고리<select name="category">{categories.slice(1).map(c=><option key={c}>{c}</option>)}</select></label><label>버전<input name="version" defaultValue="1.0.0" required/></label><label>작품 설명<textarea name="description" required maxLength={10000}/></label><label>게임 폴더 업로드 (HTML5)<input name="game_files_folder" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);const other=event.currentTarget.form?.elements.namedItem('game_file_html') as HTMLInputElement|null;if(files.length&&other)other.value='';setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB 선택됨 (최대 500개, 전체 200MB)</small>}<span className="upload-help">게임 폴더 전체를 선택하세요.</span></label><label>또는 HTML 파일 하나만 업로드<input name="game_file_html" type="file" accept=".html,.htm,text/html" onChange={event=>{const file=event.currentTarget.files?.[0];const other=event.currentTarget.form?.elements.namedItem('game_files_folder') as HTMLInputElement|null;if(file&&other)other.value='';setSelectedCount(file?1:0);setSelectedSize(file?.size||0)}}/><span className="upload-help">한 파일 안에 게임 코드가 모두 포함된 HTML 파일을 선택하세요. 다른 이미지나 스크립트 파일도 필요한 게임은 폴더 업로드를 사용하세요.</span></label><label>또는 외부 브라우저 실행 URL (HTTPS)<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><p className="upload-note">파일당 50MB, 전체 200MB까지 지원해요. 업로드가 시작되면 완료된 파일 수가 표시됩니다.</p><button className="button primary" disabled={busy}>{busy?'처리 중…':'검토 요청 제출'}</button>{message&&<p className={message.includes('제출했습니다')?'form-success':'form-error'} role="status">{message}</p>}</form></div>
 }
 function MySubmissions({ownerId}:{ownerId:string}){const [items,setItems]=useState<Project[]>([]),[loading,setLoading]=useState(true),[error,setError]=useState('');useEffect(()=>{let live=true;void supabase!.from('projects').select('id,owner_id,slug,title,description,category,version,visibility,moderation_status,cover_url,created_at').eq('owner_id',ownerId).order('updated_at',{ascending:false}).then(({data,error:e})=>{if(!live)return;setItems((data||[]) as Project[]);setError(e?.message||'');setLoading(false)});return()=>{live=false}},[ownerId]);return <section className="submission-panel"><h2>내 작품 상태</h2>{loading?<p className="muted">작품을 불러오는 중…</p>:error?<p className="form-error">{error}</p>:items.length?<div className="activity-list">{items.map(p=><div className="activity-row" key={p.id}><span className="avatar"><Gamepad2 size={16}/></span><span><b>{p.title}</b><small>{p.category} · v{p.version} · {new Date(p.created_at).toLocaleDateString('ko-KR')}</small></span><span className={`status-pill status-${p.moderation_status}`}>{projectStatusLabel(p.moderation_status)}</span>{p.moderation_status==='published'&&<Link to={`/project/${p.slug}`} aria-label={`${p.title} 보기`}><ArrowRight size={16}/></Link>}</div>)}</div>:<p className="muted">아직 제출한 작품이 없습니다. 첫 게임을 올려보세요.</p>}</section>}
 
