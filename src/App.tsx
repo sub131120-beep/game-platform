@@ -254,11 +254,11 @@ function MySubmissions({ownerId}:{ownerId:string}){
         return paths;
       };
       const files=await listFiles(folder);
-      for(let offset=0;offset<files.length;offset+=100){const {error:e}=await storage.remove(files.slice(offset,offset+100));if(e)throw e;}
       const {data,error:e}=await supabase!.from('projects').delete().eq('id',project.id).eq('owner_id',ownerId).select('id');
       if(e)throw e;
-      if(!data?.length)throw new Error('삭제 권한이 없거나 작품을 찾지 못했습니다. Supabase 마이그레이션 005 적용 여부를 확인해 주세요.');
+      if(!data?.length)throw new Error('삭제 정책이 적용되지 않았거나 작품을 찾지 못했습니다. Supabase SQL 마이그레이션 202611220002_project_deletion_rls_fix.sql을 적용해 주세요.');
       setItems(current=>current.filter(item=>item.id!==project.id));
+      for(let offset=0;offset<files.length;offset+=100){const {error:storageError}=await storage.remove(files.slice(offset,offset+100));if(storageError)throw new Error(`작품은 삭제됐지만 업로드 파일 정리가 일부 실패했습니다: ${storageError.message}`);}
     }catch(err){setError(err instanceof Error?`작품을 삭제하지 못했습니다: ${err.message}`:'작품을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.');}
     finally{setBusy('');}
   }
