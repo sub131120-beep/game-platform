@@ -6,3 +6,6 @@ verify_jwt = true
 
 [functions.ai-recommend]
 verify_jwt = true
+
+[functions.ai-create]
+verify_jwt = true
