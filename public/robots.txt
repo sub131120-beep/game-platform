@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://sub131120-beep.github.io/game-platform/sitemap.xml
