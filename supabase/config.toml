@@ -3,3 +3,6 @@ verify_jwt = true
 
 [functions.game-launch]
 verify_jwt = true
+
+[functions.ai-recommend]
+verify_jwt = true

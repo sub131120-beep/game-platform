@@ -6,7 +6,7 @@ React + TypeScript + Vite 기반의 GitHub Pages 정적 프런트엔드와 Supab
 
 - 공개 작품 탐색, 검색, 카테고리 필터, 작품 상세
 - GAM-SITE 이름과 청록색/남색 테마, 모바일에 맞춘 작품 미리보기
-- 즐겨찾기·키워드·카테고리 기반의 개인 맞춤 게임 추천
+- Gemini API 기반의 생성형 AI 게임 추천 (즐겨찾기와 취향 반영, 계정당 시간당 10회 제한)
 - Supabase Auth 회원가입(아이디/닉네임 분리), 이메일 인증 안내, 로그인/로그아웃, 재설정 메일, 비밀번호 변경
 - 로그인 후 원래 페이지로 돌아가는 실행 경로, 이메일 인증 및 계정 상태 확인
 - 즐겨찾기, 프로필 닉네임 변경
@@ -26,7 +26,7 @@ React + TypeScript + Vite 기반의 GitHub Pages 정적 프런트엔드와 Supab
 
 Supabase Auth에서 계정 정지 시 새 인증/갱신을 막고 앱 테이블 RLS에서 정지 계정 요청을 차단하도록 구성합니다. 이미 발급된 JWT 자체는 만료 전까지 stateless하게 유효할 수 있으므로, 민감한 서버 작업은 항상 계정 상태를 재검증하고 적절한 JWT 만료 시간을 설정해야 합니다. 공개 미리보기는 공개 승인 작품의 HTTPS 빌드만 반환하며 격리된 iframe 안에서 표시합니다. 맞춤 추천은 즐겨찾기와 키워드, 작품 메타데이터를 브라우저에서 비교하며 외부 생성형 AI API나 API 키를 사용하지 않습니다.
 
-이메일 템플릿/SMTP, 허용 redirect URL, RLS 배포, Edge Function secrets, 최초 admin 지정, 실제 이용약관/개인정보 문구 및 서비스 운영자 연락처는 Supabase/GitHub 대시보드에서 구성해야 합니다. 법률 문서는 현재 초안 안내입니다.
+이메일 템플릿/SMTP, 허용 redirect URL, RLS 배포, Edge Function secrets, 최초 admin 지정, 실제 이용약관/개인정보 문구 및 서비스 운영자 연락처는 Supabase/GitHub 대시보드에서 구성해야 합니다. 법률 문서는 현재 초안 안내입니다. 생성형 AI 추천은 공개 작품의 제목/소개/카테고리, 즐겨찾기 정보와 사용자가 입력한 취향을 Gemini API로 전송하며, Google AI Studio의 Gemini API 사용량 정책과 요금이 적용됩니다. API 키는 Supabase 함수 비밀값으로만 보관합니다.
 
 ## 로컬 실행
 
@@ -43,15 +43,16 @@ npm run dev
 
 1. Supabase 프로젝트를 만들고 Authentication > URL Configuration의 Site URL과 Redirect URLs에 로컬 주소 및 GitHub Pages URL을 등록합니다. 프로젝트 페이지는 `https://OWNER.github.io/REPOSITORY/` 형식입니다.
 2. Authentication에서 이메일 확인을 활성화하고 실제 운영 이메일 발송에는 검증된 SMTP를 설정합니다.
-3. 새 프로젝트의 SQL Editor에서 migration 파일을 번호 순서대로 적용합니다: `202610220001_initial_schema.sql`, `202610220002_game_storage.sql`, `202610220003_upload_email_allowlist.sql`, `202610220004_creator_profiles.sql`, `202610230001_auto_publish_allowlisted_projects.sql`, `202610260001_owner_project_deletion.sql`, `202610270001_timed_account_bans.sql`, `202610270002_temporary_moderators.sql`, `202611220001_project_editing.sql`, `202611220002_project_deletion_rls_fix.sql`. 이미 설치된 프로젝트에는 누락된 migration만 적용합니다.
+3. 새 프로젝트의 SQL Editor에서 migration 파일을 번호 순서대로 적용합니다: `202610220001_initial_schema.sql`, `202610220002_game_storage.sql`, `202610220003_upload_email_allowlist.sql`, `202610220004_creator_profiles.sql`, `202610230001_auto_publish_allowlisted_projects.sql`, `202610260001_owner_project_deletion.sql`, `202610270001_timed_account_bans.sql`, `202610270002_temporary_moderators.sql`, `202611220001_project_editing.sql`, `202611220002_project_deletion_rls_fix.sql`, `202611220003_ai_recommendation_quota.sql`. 이미 설치된 프로젝트에는 누락된 migration만 적용합니다.
 4. SQL Editor에서 업로드 허용 이메일을 비공개 DB 허용 목록에 추가합니다: `insert into public.game_upload_allowlist(email) values (lower('YOUR_EMAIL')) on conflict (email) do nothing;` 이 주소는 프런트엔드 번들이나 공개 저장소에 넣지 않습니다.
 5. 관리자 신고 처리를 포함한 Edge Function 코드를 Supabase CLI로 배포합니다:
    ```sh
    supabase functions deploy admin-action
    supabase functions deploy game-launch
    supabase functions deploy game-preview
+   supabase functions deploy ai-recommend
    ```
-   Supabase에서 제공하는 함수 secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`를 확인합니다. service role key를 클라이언트 환경에 복사하지 않습니다.
+   Supabase 함수 secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`, `GEMINI_API_KEY`를 확인합니다. 모델 변경은 선택적으로 `GEMINI_MODEL` secret에 모델명을 설정합니다. service role key와 Gemini API key를 클라이언트 환경에 복사하지 않습니다.
 6. 신뢰할 수 있는 초기 운영자 한 명을 Auth 가입 완료 후 SQL Editor에서 역할 승격합니다: `update public.profiles set role='admin' where username='YOUR_USERNAME';` 운영 DB에서만 신원을 별도로 확인한 후 실행합니다.
 7. Supabase Auth password policy와 rate limits를 검토하고, 이메일 링크 만료 및 JWT 만료 시간을 운영 요구에 맞게 정합니다.
 
