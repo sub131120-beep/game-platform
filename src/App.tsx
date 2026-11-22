@@ -48,17 +48,32 @@ function Detail({projects,favorites,toggleFavorite,session}:{projects:Project[];
 }
 
 function GamePreview({projectId,title}:{projectId:string;title:string}){
-  const [url,setUrl]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
+  const [url,setUrl]=useState(''),[html,setHtml]=useState(''),[busy,setBusy]=useState(false),[error,setError]=useState('');
   async function openPreview(){
     if(!supabase){setError('미리보기를 불러올 수 없습니다.');return}
-    setBusy(true);setError('');
-    const {data,error:invokeError}=await supabase.functions.invoke('game-preview',{body:{project_id:projectId}});
-    if(invokeError||!data?.launch_url)setError('미리보기를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
-    else if(!isHttpsLaunchUrl(data.launch_url))setError('안전하지 않은 미리보기 주소입니다.');
-    else setUrl(data.launch_url);
-    setBusy(false);
+    setBusy(true);setError('');setHtml('');
+    try{
+      const {data,error:invokeError}=await supabase.functions.invoke('game-preview',{body:{project_id:projectId}});
+      if(invokeError||!data?.launch_url)throw new Error('미리보기를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');
+      if(!isHttpsLaunchUrl(data.launch_url))throw new Error('안전하지 않은 미리보기 주소입니다.');
+      const launch=new URL(data.launch_url),storagePrefix=supabaseProjectUrl?new URL('/storage/v1/object/public/game-builds/',supabaseProjectUrl).toString():'';
+      if(storagePrefix&&launch.href.startsWith(storagePrefix)&&launch.pathname.endsWith('/index.html')){
+        const response=await fetch(launch.href,{mode:'cors',credentials:'omit'});
+        if(!response.ok)throw new Error('게임 HTML을 가져오지 못했습니다.');
+        let source=await response.text();
+        if(source.length>50*1024*1024)throw new Error('게임 HTML 파일이 너무 큽니다.');
+        if(!/<html(?:\s|>)/i.test(source)||!/<\/html\s*>/i.test(source))throw new Error('올린 index.html 안에 완전한 HTML 문서가 있는지 확인해 주세요.');
+        const assetOrigin=new URL(supabaseProjectUrl!).origin,baseUrl=new URL('.',launch.href).href;
+        const csp=`<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' ${assetOrigin} data: blob:; style-src 'unsafe-inline' ${assetOrigin} data:; img-src ${assetOrigin} data: blob:; font-src ${assetOrigin} data:; media-src ${assetOrigin} data: blob:; connect-src ${assetOrigin}; object-src 'none'; base-uri ${assetOrigin}; form-action 'none'">`;
+        const base=`<base href="${baseUrl}">`;
+        if(/<head(?:\s[^>]*)?>/i.test(source))source=source.replace(/<head(?:\s[^>]*)?>/i,head=>`${head}\n${csp}\n${base}`);else source=source.replace(/<html(?:\s[^>]*)?>/i,root=>`${root}<head>${csp}${base}</head>`);
+        setHtml(source);
+      }else setUrl(launch.toString());
+    }catch(err){setError(err instanceof Error?err.message:'미리보기를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.');}
+    finally{setBusy(false)}
   }
-  return <div className="game-preview" id="preview"><div className="preview-heading"><div><div className="eyebrow muted">LIVE PREVIEW</div><h3>{title} 미리보기</h3></div><button className="button" onClick={()=>url?setUrl(''):void openPreview()} disabled={busy}>{busy?'불러오는 중…':url?'미리보기 닫기':'게임 미리보기'}</button></div>{url?<iframe title={`${title} 미리보기`} src={url} sandbox="allow-scripts allow-pointer-lock" referrerPolicy="no-referrer" allow="fullscreen; gamepad"/>:<p>{error||'공개 게임을 이 페이지에서 바로 확인할 수 있어요.'}</p>}</div>
+  const isOpen=Boolean(url||html);
+  return <div className="game-preview" id="preview"><div className="preview-heading"><div><div className="eyebrow muted">LIVE PREVIEW</div><h3>{title} 미리보기</h3></div><button className="button" onClick={()=>isOpen?(setUrl(''),setHtml('')):void openPreview()} disabled={busy}>{busy?'불러오는 중…':isOpen?'미리보기 닫기':'게임 미리보기'}</button></div>{isOpen?<iframe title={`${title} 미리보기`} src={url||undefined} srcDoc={html||undefined} sandbox="allow-scripts allow-pointer-lock" referrerPolicy="no-referrer" allow="fullscreen; gamepad"/>:<p>{error||'공개 게임을 이 페이지에서 바로 확인할 수 있어요.'}</p>}</div>
 }
 
 function CreatorLink({projectId}:{projectId:string}){const [creator,setCreator]=useState<{username:string;display_name:string}|null>(null);useEffect(()=>{let live=true;void supabase?.rpc('get_project_creator',{p_project_id:projectId}).maybeSingle().then(({data})=>{if(live&&data)setCreator(data as typeof creator)});return()=>{live=false}},[projectId]);return creator?<Link className="creator-link" to={`/creator/${creator.username}`}>{creator.display_name} <span>@{creator.username}</span></Link>:<b>제작자</b>}
@@ -264,7 +279,7 @@ function EditProjectForm({project,ownerId,onCancel,onSaved}:{project:Project;own
   const [busy,setBusy]=useState(false),[message,setMessage]=useState(''),[selectedCount,setSelectedCount]=useState(0),[selectedSize,setSelectedSize]=useState(0);
   async function save(event:FormEvent<HTMLFormElement>){
     event.preventDefault();if(!supabase)return;
-    const form=event.currentTarget,data=new FormData(form),folder=form.elements.namedItem('edit_game_folder') as HTMLInputElement,html=form.elements.namedItem('edit_game_html') as HTMLInputElement;
+    const form=event.currentTarget,data=new FormData(form),folder=form.elements.namedItem('edit_game_folder') as HTMLInputElement,html=form.elements.namedItem('edit_game_html') as HTMLInputElement,coverImage=form.elements.namedItem('cover_image') as HTMLInputElement;
     const uploaded:string[]=[];setBusy(true);setMessage('변경 사항을 저장하고 있어요…');
     try{
       const {data:allowed,error:permissionError}=await supabase.rpc('can_upload_games');
@@ -273,10 +288,12 @@ function EditProjectForm({project,ownerId,onCancel,onSaved}:{project:Project;own
       let entries:{file:File;path:string}[]=folder.files?.length?getGameFileEntries(folder.files):[];
       if(html.files?.length){const file=html.files[0];if(!/\.html?$/i.test(file.name))throw new Error('단일 파일은 HTML 파일만 선택할 수 있어요.');if(file.size>MAX_GAME_FILE_BYTES)throw new Error('개별 파일은 50MB 이하여야 해요.');entries=[{file,path:'index.html'}]}
       const externalUrl=String(data.get('launch_url')||'').trim();
-      const coverUrl=String(data.get('cover_url')||'').trim();
+      const coverUrl=String(data.get('cover_url')||'').trim(),coverFile=coverImage.files?.[0];
       if(externalUrl&&entries.length)throw new Error('새 게임 파일 또는 외부 HTTPS 주소 중 하나만 입력해 주세요.');
       if(externalUrl&&new URL(externalUrl).protocol!=='https:')throw new Error('실행 주소는 HTTPS여야 합니다.');
       if(coverUrl&&new URL(coverUrl).protocol!=='https:')throw new Error('표지 이미지 주소는 HTTPS여야 합니다.');
+      if(coverFile&&(!['image/png','image/jpeg','image/webp','image/gif'].includes(coverFile.type)||coverFile.size>5*1024*1024))throw new Error('표지는 PNG, JPG, WebP, GIF 형식의 5MB 이하 이미지여야 합니다.');
+      let nextCoverUrl=coverUrl;
       let launchUrl=externalUrl||null,storagePath:string|null=null;
       if(entries.length){
         const storage=supabase.storage.from('game-builds'),versionKey=crypto.randomUUID();
@@ -292,13 +309,14 @@ function EditProjectForm({project,ownerId,onCancel,onSaved}:{project:Project;own
         }
         launchUrl=storage.getPublicUrl(`${storagePath}/index.html`).data.publicUrl;
       }
-      const {error}=await supabase.rpc('update_owned_project',{p_project_id:project.id,p_title:String(data.get('title')).trim(),p_slug:String(data.get('slug')).trim().toLowerCase(),p_description:String(data.get('description')).trim(),p_category:String(data.get('category')),p_version:String(data.get('version')).trim(),p_cover_url:coverUrl,p_launch_url:launchUrl,p_storage_path:storagePath,p_build_type:entries.length?'html5':externalUrl?'web_project':null});
+      if(coverFile){const ext=coverFile.type==='image/jpeg'?'jpg':coverFile.type.split('/')[1],path=`${ownerId}/${project.id}/covers/${crypto.randomUUID()}.${ext}`,storage=supabase.storage.from('game-builds');uploaded.push(path);const {error:coverError}=await storage.upload(path,coverFile,{contentType:coverFile.type,cacheControl:'3600',upsert:false});if(coverError)throw coverError;nextCoverUrl=storage.getPublicUrl(path).data.publicUrl;}
+      const {error}=await supabase.rpc('update_owned_project',{p_project_id:project.id,p_title:String(data.get('title')).trim(),p_slug:String(data.get('slug')).trim().toLowerCase(),p_description:String(data.get('description')).trim(),p_category:String(data.get('category')),p_version:String(data.get('version')).trim(),p_cover_url:nextCoverUrl,p_launch_url:launchUrl,p_storage_path:storagePath,p_build_type:entries.length?'html5':externalUrl?'web_project':null});
       if(error)throw error;
       setMessage('작품 정보가 저장됐어요. 새 파일을 올렸다면 새 버전으로 바뀌었습니다.');await onSaved();
     }catch(error){if(uploaded.length)await supabase.storage.from('game-builds').remove(uploaded);setMessage(error instanceof Error?`수정하지 못했습니다: ${error.message}`:'수정하지 못했습니다. 다시 시도해 주세요.');}
     finally{setBusy(false)}
   }
-  return <form className="settings-card edit-project-form" onSubmit={save}><div className="eyebrow muted">EDIT GAME</div><h3>{project.title} 수정</h3><label>작품 이름<input name="title" defaultValue={project.title} required maxLength={100}/></label><label>고유 주소<input name="slug" defaultValue={project.slug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80}/></label><label>카테고리<select name="category" defaultValue={project.category}>{categories.slice(1).map(category=><option key={category}>{category}</option>)}</select></label><label>버전<input name="version" defaultValue={project.version} required maxLength={40}/></label><label>작품 설명<textarea name="description" defaultValue={project.description} required maxLength={10000}/></label><label>표지 이미지 URL<input name="cover_url" type="url" defaultValue={project.cover_url||''} placeholder="https://..."/></label><label>새 게임 폴더 업로드<input name="edit_game_folder" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);const other=event.currentTarget.form?.elements.namedItem('edit_game_html') as HTMLInputElement|null;if(files.length&&other)other.value='';setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/><span className="upload-help">새 빌드를 올리면 기존 버전은 보관되고 최신 버전으로 전환됩니다.</span></label>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB</small>}<label>또는 새 HTML 파일 하나<input name="edit_game_html" type="file" accept=".html,.htm,text/html" onChange={event=>{const file=event.currentTarget.files?.[0];const other=event.currentTarget.form?.elements.namedItem('edit_game_folder') as HTMLInputElement|null;if(file&&other)other.value='';setSelectedCount(file?1:0);setSelectedSize(file?.size||0)}}/></label><label>또는 새 외부 게임 주소<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><div className="edit-form-actions"><button type="button" className="button" onClick={onCancel}>취소</button><button className="button primary" disabled={busy}>{busy?'저장 중…':'변경 저장'}</button></div>{message&&<p className={message.startsWith('작품 정보가')?'form-success':'form-error'} role="status">{message}</p>}</form>
+  return <form className="settings-card edit-project-form" onSubmit={save}><div className="eyebrow muted">EDIT GAME</div><h3>{project.title} 수정</h3><label>작품 이름<input name="title" defaultValue={project.title} required maxLength={100}/></label><label>고유 주소<input name="slug" defaultValue={project.slug} required pattern="[a-z0-9]+(-[a-z0-9]+)*" maxLength={80}/></label><label>카테고리<select name="category" defaultValue={project.category}>{categories.slice(1).map(category=><option key={category}>{category}</option>)}</select></label><label>버전<input name="version" defaultValue={project.version} required maxLength={40}/></label><label>작품 설명<textarea name="description" defaultValue={project.description} required maxLength={10000}/></label><label>표지 이미지 URL<input name="cover_url" type="url" defaultValue={project.cover_url||''} placeholder="https://..."/></label><label>또는 표지 이미지 파일<input name="cover_image" type="file" accept="image/png,image/jpeg,image/webp,image/gif"/><span className="upload-help">PNG, JPG, WebP, GIF · 5MB 이하. 선택하면 URL 대신 이 이미지가 표시됩니다.</span></label><label>새 게임 폴더 업로드<input name="edit_game_folder" type="file" multiple ref={input=>input?.setAttribute('webkitdirectory','')} onChange={event=>{const files=Array.from(event.currentTarget.files||[]);const other=event.currentTarget.form?.elements.namedItem('edit_game_html') as HTMLInputElement|null;if(files.length&&other)other.value='';setSelectedCount(files.length);setSelectedSize(files.reduce((sum,file)=>sum+file.size,0))}}/><span className="upload-help">새 빌드를 올리면 기존 버전은 보관되고 최신 버전으로 전환됩니다.</span></label>{selectedCount>0&&<small>{selectedCount}개 파일 · {(selectedSize/1024/1024).toFixed(1)}MB</small>}<label>또는 새 HTML 파일 하나<input name="edit_game_html" type="file" accept=".html,.htm,text/html" onChange={event=>{const file=event.currentTarget.files?.[0];const other=event.currentTarget.form?.elements.namedItem('edit_game_folder') as HTMLInputElement|null;if(file&&other)other.value='';setSelectedCount(file?1:0);setSelectedSize(file?.size||0)}}/></label><label>또는 새 외부 게임 주소<input name="launch_url" type="url" placeholder="https://games.example.com/my-game/"/></label><div className="edit-form-actions"><button type="button" className="button" onClick={onCancel}>취소</button><button className="button primary" disabled={busy}>{busy?'저장 중…':'변경 저장'}</button></div>{message&&<p className={message.startsWith('작품 정보가')?'form-success':'form-error'} role="status">{message}</p>}</form>
 }
 function projectStatusLabel(status:string){return ({draft:'초안',review:'검토 중',published:'공개',suspended:'비공개/정지',pending_deletion:'삭제 대기'} as Record<string,string>)[status]||status}
 
