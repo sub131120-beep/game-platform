@@ -1,15 +1,19 @@
-# PLAYGROUND — 인디 게임 허브
+# GAM-SITE — 인디 게임 허브
 
 React + TypeScript + Vite 기반의 GitHub Pages 정적 프런트엔드와 Supabase Auth/PostgreSQL/RLS 연동 기반입니다. 정적 배포만으로 서버 비밀키를 숨길 수 없으므로 브라우저에는 Supabase URL과 publishable/anon key만 들어가며, 보호는 RLS와 Edge Function에서 처리합니다.
 
 ## 현재 구현
 
 - 공개 작품 탐색, 검색, 카테고리 필터, 작품 상세
+- GAM-SITE 이름과 청록색/남색 테마, 모바일에 맞춘 작품 미리보기
+- 즐겨찾기·키워드·카테고리 기반의 개인 맞춤 게임 추천
 - Supabase Auth 회원가입(아이디/닉네임 분리), 이메일 인증 안내, 로그인/로그아웃, 재설정 메일, 비밀번호 변경
 - 로그인 후 원래 페이지로 돌아가는 실행 경로, 이메일 인증 및 계정 상태 확인
 - 즐겨찾기, 프로필 닉네임 변경
 - 회원별 최근 플레이 기록, 공개 제작자 프로필, 작품 신고
 - 제작자 제출작 상태 확인, 관리자 신고 처리와 감사 로그 조회
+- 제작자가 작품 이름, 주소, 설명, 카테고리, 버전, 표지, 게임 빌드를 수정하거나 삭제
+- 관리자 대시보드의 작품/회원 검색, 운영 요약, 시간제 밴과 임시 관리자 관리
 - 허용 목록 이메일 계정만 작품 제출 가능, 외부 HTTPS 주소 연결, HTML5 게임 폴더의 Supabase Storage 업로드
 - 관리자 작품 공개/비공개 검토 및 회원 정지/해제 Edge Functions와 감사 로그
 - 서버 측 game-launch 권한 검사와 플레이 접근 기록 (실행 URL은 공개 작품 빌드 정책에서 숨김)
@@ -20,7 +24,7 @@ React + TypeScript + Vite 기반의 GitHub Pages 정적 프런트엔드와 Supab
 
 이 저장소는 운영 가능한 기반을 구성한 MVP이며, 첨부 명세 전체의 완성본은 아닙니다. HTML5 정적 게임 폴더 업로드는 파일 500개, 합계 200MB, 파일당 50MB까지 지원하지만 악성 파일 검사, 대용량 빌드 파이프라인은 아직 없습니다. Storage 버킷은 게임 실행을 위해 공개 읽기로 구성되어 업로드된 파일은 URL을 아는 누구나 열 수 있습니다. 전체 회원 관리, 계정 삭제 및 데이터 보존 자동화, 인증 이벤트 조회, 백업 스케줄과 복구 검증, CAPTCHA/추가 스팸 방지, E2E 테스트는 추가 작업이 필요합니다.
 
-Supabase Auth에서 계정 정지 시 새 인증/갱신을 막고 앱 테이블 RLS에서 정지 계정 요청을 차단하도록 구성합니다. 이미 발급된 JWT 자체는 만료 전까지 stateless하게 유효할 수 있으므로, 민감한 서버 작업은 항상 계정 상태를 재검증하고 적절한 JWT 만료 시간을 설정해야 합니다.
+Supabase Auth에서 계정 정지 시 새 인증/갱신을 막고 앱 테이블 RLS에서 정지 계정 요청을 차단하도록 구성합니다. 이미 발급된 JWT 자체는 만료 전까지 stateless하게 유효할 수 있으므로, 민감한 서버 작업은 항상 계정 상태를 재검증하고 적절한 JWT 만료 시간을 설정해야 합니다. 공개 미리보기는 공개 승인 작품의 HTTPS 빌드만 반환하며 격리된 iframe 안에서 표시합니다. 맞춤 추천은 즐겨찾기와 키워드, 작품 메타데이터를 브라우저에서 비교하며 외부 생성형 AI API나 API 키를 사용하지 않습니다.
 
 이메일 템플릿/SMTP, 허용 redirect URL, RLS 배포, Edge Function secrets, 최초 admin 지정, 실제 이용약관/개인정보 문구 및 서비스 운영자 연락처는 Supabase/GitHub 대시보드에서 구성해야 합니다. 법률 문서는 현재 초안 안내입니다.
 
@@ -39,12 +43,13 @@ npm run dev
 
 1. Supabase 프로젝트를 만들고 Authentication > URL Configuration의 Site URL과 Redirect URLs에 로컬 주소 및 GitHub Pages URL을 등록합니다. 프로젝트 페이지는 `https://OWNER.github.io/REPOSITORY/` 형식입니다.
 2. Authentication에서 이메일 확인을 활성화하고 실제 운영 이메일 발송에는 검증된 SMTP를 설정합니다.
-3. 새 프로젝트의 SQL Editor에서 `supabase/migrations/202610220001_initial_schema.sql`을 한 번 적용하고, 이어서 `202610220002_game_storage.sql`, `202610220003_upload_email_allowlist.sql`, `202610220004_creator_profiles.sql` 순서로 한 번씩 적용합니다. 기존 프로젝트에서 첫 세 마이그레이션을 이미 실행했다면 `202610220004_creator_profiles.sql`만 추가 적용합니다.
+3. 새 프로젝트의 SQL Editor에서 migration 파일을 번호 순서대로 적용합니다: `202610220001_initial_schema.sql`, `202610220002_game_storage.sql`, `202610220003_upload_email_allowlist.sql`, `202610220004_creator_profiles.sql`, `202610230001_auto_publish_allowlisted_projects.sql`, `202610260001_owner_project_deletion.sql`, `202610270001_timed_account_bans.sql`, `202610270002_temporary_moderators.sql`, `202611220001_project_editing.sql`. 이미 설치된 프로젝트에는 누락된 migration만 적용합니다.
 4. SQL Editor에서 업로드 허용 이메일을 비공개 DB 허용 목록에 추가합니다: `insert into public.game_upload_allowlist(email) values (lower('YOUR_EMAIL')) on conflict (email) do nothing;` 이 주소는 프런트엔드 번들이나 공개 저장소에 넣지 않습니다.
 5. 관리자 신고 처리를 포함한 Edge Function 코드를 Supabase CLI로 배포합니다:
    ```sh
    supabase functions deploy admin-action
    supabase functions deploy game-launch
+   supabase functions deploy game-preview
    ```
    Supabase에서 제공하는 함수 secrets `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`를 확인합니다. service role key를 클라이언트 환경에 복사하지 않습니다.
 6. 신뢰할 수 있는 초기 운영자 한 명을 Auth 가입 완료 후 SQL Editor에서 역할 승격합니다: `update public.profiles set role='admin' where username='YOUR_USERNAME';` 운영 DB에서만 신원을 별도로 확인한 후 실행합니다.
