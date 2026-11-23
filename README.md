@@ -42,7 +42,7 @@ npm run dev
 ## Supabase 준비
 
 1. Supabase 프로젝트를 만들고 Authentication > URL Configuration의 Site URL과 Redirect URLs에 로컬 주소 및 GitHub Pages URL을 등록합니다. 프로젝트 페이지는 `https://OWNER.github.io/REPOSITORY/` 형식입니다.
-2. Authentication에서 이메일 확인을 활성화하고 실제 운영 이메일 발송에는 검증된 SMTP를 설정합니다.
+2. 이메일 인증 없이 즉시 가입시키려면 Authentication > Providers > Email에서 Confirm email을 끕니다. 비밀번호 최소 길이와 인증 요청 rate limit은 유지하세요.
 3. 새 프로젝트의 SQL Editor에서 migration 파일을 번호 순서대로 적용합니다: `202610220001_initial_schema.sql`, `202610220002_game_storage.sql`, `202610220003_upload_email_allowlist.sql`, `202610220004_creator_profiles.sql`, `202610230001_auto_publish_allowlisted_projects.sql`, `202610260001_owner_project_deletion.sql`, `202610270001_timed_account_bans.sql`, `202610270002_temporary_moderators.sql`, `202611220001_project_editing.sql`, `202611220002_project_deletion_rls_fix.sql`, `202611220003_ai_recommendation_quota.sql`. 이미 설치된 프로젝트에는 누락된 migration만 적용합니다.
 4. SQL Editor에서 업로드 허용 이메일을 비공개 DB 허용 목록에 추가합니다: `insert into public.game_upload_allowlist(email) values (lower('YOUR_EMAIL')) on conflict (email) do nothing;` 이 주소는 프런트엔드 번들이나 공개 저장소에 넣지 않습니다.
 5. 관리자 신고 처리를 포함한 Edge Function 코드를 Supabase CLI로 배포합니다:
