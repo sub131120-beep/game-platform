@@ -24,6 +24,7 @@ const pages = new Map([
   [`${site}/`, new Date().toISOString().slice(0, 10)],
   [`${site}/terms`, null],
   [`${site}/privacy`, null],
+  [`${site}/ai`, null],
 ]);
 
 if (supabaseUrl && anonKey) {
