@@ -21,7 +21,11 @@ function App() {
   const canManage=profile?.role==='admin'||profile?.role==='moderator'||(profile?.moderator_until&&new Date(profile.moderator_until).getTime()>Date.now());
   const refresh=async()=>{
     if(!supabase){setLoading(false);return}
-    const [{data:{session:s}}, {data:p}] = await Promise.all([supabase.auth.getSession(), supabase.from('profiles').select('id,username,display_name,role,account_status,banned_until,moderator_until').maybeSingle()]);
+    const {data:{session:s}} = await supabase.auth.getSession();
+    const {data:p,error:profileError} = s
+      ? await supabase.from('profiles').select('id,username,display_name,role,account_status,banned_until,moderator_until').eq('id',s.user.id).maybeSingle()
+      : {data:null,error:null};
+    if(profileError)setNotice(profileError.message);
     setSession(s); setProfile(p); setFavorites([]);
     if(s){const {data:allowed}=await supabase.rpc('can_upload_games');setCanUpload(allowed===true)}else setCanUpload(false);
     const {data,error}=await supabase.from('projects').select('id,owner_id,slug,title,description,category,version,visibility,moderation_status,cover_url,created_at').eq('visibility','public').eq('moderation_status','published').order('created_at',{ascending:false});
