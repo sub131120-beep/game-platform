@@ -8,6 +8,26 @@ type ActionBody = {
 };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers: corsHeaders });
 
+async function listStorageFiles(admin: ReturnType<typeof createClient>, bucket: string, prefix: string): Promise<string[]> {
+  const files: string[] = [];
+  async function walk(folder: string): Promise<void> {
+    let offset = 0;
+    while (true) {
+      const { data, error } = await admin.storage.from(bucket).list(folder, { limit: 1000, offset });
+      if (error) throw new Error(`Could not list account game files: ${error.message}`);
+      for (const entry of data || []) {
+        const path = `${folder}/${entry.name}`;
+        if (entry.id == null) await walk(path);
+        else files.push(path);
+      }
+      if (!data || data.length < 1000) break;
+      offset += data.length;
+    }
+  }
+  await walk(prefix);
+  return files;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   const authHeader = req.headers.get('Authorization');
@@ -38,6 +58,35 @@ Deno.serve(async (req) => {
     const { error: authError } = await admin.auth.admin.updateUserById(targetId, { ban_duration: body.status === 'active' ? 'none' : '876000h' });
     if (authError) result = { error: authError };
     else result = await admin.from('profiles').update({ account_status: body.status, banned_until: null }).eq('id', targetId);
+  } else if (body.action === 'delete_account' && isRootAdmin && targetId && targetId !== user.id) {
+    const { data: target, error: targetError } = await admin.from('profiles').select('role,moderator_until').eq('id', targetId).maybeSingle();
+    if (targetError) return json({ error: targetError.message }, 400);
+    if (!target || !['user','developer'].includes(target.role) || (target.moderator_until && new Date(target.moderator_until).getTime() > Date.now())) {
+      return json({ error: 'Only regular member accounts can be permanently deleted' }, 400);
+    }
+    try {
+      const paths = await listStorageFiles(admin, 'game-builds', targetId);
+      for (let i = 0; i < paths.length; i += 1000) {
+        const { error } = await admin.storage.from('game-builds').remove(paths.slice(i, i + 1000));
+        if (error) throw new Error(`Could not remove account game files: ${error.message}`);
+      }
+    } catch (error) {
+      return json({ error: error instanceof Error ? error.message : 'Could not remove account game files' }, 500);
+    }
+    const { error: reviewerError } = await admin.from('reports').update({ reviewed_by: null }).eq('reviewed_by', targetId);
+    if (reviewerError) result = { error: reviewerError };
+    if (!result.error) {
+      const { error } = await admin.from('reports').delete().eq('reporter_id', targetId);
+      if (error) result = { error };
+    }
+    if (!result.error) {
+      const { error } = await admin.from('projects').delete().eq('owner_id', targetId);
+      if (error) result = { error };
+    }
+    if (!result.error) {
+      const { error } = await admin.auth.admin.deleteUser(targetId);
+      if (error) result = { error };
+    }
   } else if ((body.action === 'ban_user' || body.action === 'unban_user') && targetId && targetId !== user.id) {
     const { data: target } = await admin.from('profiles').select('role,moderator_until,banned_until').eq('id', targetId).maybeSingle();
     if (!target || target.role === 'admin' || (!isRootAdmin && (target.role === 'moderator' || (target.moderator_until && new Date(target.moderator_until).getTime() > Date.now())))) {
@@ -80,9 +129,9 @@ Deno.serve(async (req) => {
   } else return json({ error: 'Unsupported action or insufficient privileges' }, 400);
 
   const { error: auditError } = await admin.from('admin_audit_logs').insert({
-    actor_id: user.id, target_user_id: targetId ?? null, action: body.action,
+    actor_id: user.id, target_user_id: body.action === 'delete_account' ? null : targetId ?? null, action: body.action,
     result: result.error ? 'failed' : 'success',
-    details: { project_id: body.project_id ?? null, status: body.status ?? null, duration: body.duration ?? null, unit: body.unit ?? null, error: result.error?.message ?? null },
+    details: { project_id: body.project_id ?? null, target_user_id: targetId ?? null, status: body.status ?? null, duration: body.duration ?? null, unit: body.unit ?? null, error: result.error?.message ?? null },
   });
   if (result.error) return json({ error: result.error.message }, 400);
   if (auditError) return json({ error: `Action succeeded but audit logging failed: ${auditError.message}` }, 500);
